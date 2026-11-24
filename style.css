@@ -521,3 +521,29 @@ input.input-invalid {
     width: auto;
   }
 }
+
+/* Budget allocation notice and export action */
+.info-banner {
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--info-border, #bfdbfe);
+  border-radius: 0.65rem;
+  background: var(--info-bg, #eff6ff);
+  color: var(--info-text, #1e3a8a);
+  line-height: 1.5;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
