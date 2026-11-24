@@ -6,6 +6,13 @@
 const STORAGE_KEY = "club_event_budget_tracker_v1";
 const APPROVAL_OPTIONS = ["Planned", "Approved", "Paid"];
 
+const DEFAULT_FORECAST = {
+  annualBudget: 6000,
+  totalEventsInYear: 6,
+  priorEventsCompleted: 2,
+  priorEventsSpent: 1850
+};
+
 const DEFAULT_STATE = {
   eventName: "Welcome Week Club Social",
   totalPlannedBudget: 1000,
@@ -37,7 +44,8 @@ const DEFAULT_STATE = {
       planned: 200,
       actual: 125
     }
-  ]
+  ],
+  yearForecast: { ...DEFAULT_FORECAST }
 };
 
 // Active application state
@@ -49,6 +57,45 @@ let filterState = {
   approval: "ALL",
   overBudgetOnly: false
 };
+
+function sanitizeForecast(raw) {
+  const source = raw && typeof raw === "object" ? raw : {};
+
+  const annualBudget =
+    typeof source.annualBudget === "number" &&
+    Number.isFinite(source.annualBudget) &&
+    source.annualBudget >= 0
+      ? Math.round(source.annualBudget * 100) / 100
+      : DEFAULT_FORECAST.annualBudget;
+
+  const totalEventsInYear =
+    typeof source.totalEventsInYear === "number" &&
+    Number.isInteger(source.totalEventsInYear) &&
+    source.totalEventsInYear >= 1
+      ? source.totalEventsInYear
+      : DEFAULT_FORECAST.totalEventsInYear;
+
+  const priorEventsCompleted =
+    typeof source.priorEventsCompleted === "number" &&
+    Number.isInteger(source.priorEventsCompleted) &&
+    source.priorEventsCompleted >= 0
+      ? source.priorEventsCompleted
+      : DEFAULT_FORECAST.priorEventsCompleted;
+
+  const priorEventsSpent =
+    typeof source.priorEventsSpent === "number" &&
+    Number.isFinite(source.priorEventsSpent) &&
+    source.priorEventsSpent >= 0
+      ? Math.round(source.priorEventsSpent * 100) / 100
+      : DEFAULT_FORECAST.priorEventsSpent;
+
+  return {
+    annualBudget,
+    totalEventsInYear,
+    priorEventsCompleted,
+    priorEventsSpent
+  };
+}
 
 function loadState() {
   try {
@@ -78,6 +125,9 @@ function loadState() {
           approvalStatus: normalizeApprovalStatus(item.approvalStatus)
         }));
 
+        // Fill in annual forecast defaults for older saved data
+        parsed.yearForecast = sanitizeForecast(parsed.yearForecast);
+
         return parsed;
       }
     }
@@ -99,14 +149,15 @@ function cloneDefaultState() {
   return {
     eventName: DEFAULT_STATE.eventName,
     totalPlannedBudget: DEFAULT_STATE.totalPlannedBudget,
-    categories: DEFAULT_STATE.categories.map((item) => ({ ...item }))
+    categories: DEFAULT_STATE.categories.map((item) => ({ ...item })),
+    yearForecast: { ...DEFAULT_FORECAST }
   };
 }
 
 
 /* ==========================================================================
    2. PROCESSING LAYER (RULES & CALCULATIONS)
-   Handles validation, currency formatting, filtering, and budget math.
+   Handles validation, currency formatting, filtering, charts, and forecasts.
    ========================================================================== */
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
@@ -142,6 +193,22 @@ function validateMoney(rawValue, label) {
   // Round to 2 decimal places to avoid floating-point drift
   const rounded = Math.round(parsed * 100) / 100;
   return { valid: true, value: rounded };
+}
+
+/**
+ * Validates a whole number (for event counts).
+ */
+function validateWholeNumber(rawValue, label, minValue) {
+  if (rawValue === "" || rawValue === null || rawValue === undefined) {
+    return { valid: false, message: `Please enter a whole number for ${label} (${minValue} or higher).` };
+  }
+
+  const parsed = Number(rawValue);
+  if (!Number.isInteger(parsed) || parsed < minValue) {
+    return { valid: false, message: `${label} must be a whole number (${minValue} or higher).` };
+  }
+
+  return { valid: true, value: parsed };
 }
 
 /**
@@ -257,6 +324,123 @@ function calculateEventTotals(categories, totalPlannedBudget) {
     progressTone,
     budgetDifference,
     hasPlanMismatch
+  };
+}
+
+/**
+ * Groups actual spending by approval status (Paid, Approved, Planned) for the cash-flow chart.
+ */
+function calculateApprovalBreakdown(categories) {
+  const sums = { Paid: 0, Approved: 0, Planned: 0 };
+
+  for (const cat of categories) {
+    const status = normalizeApprovalStatus(cat.approvalStatus);
+    sums[status] += cat.actual;
+  }
+
+  const paid = Math.round(sums.Paid * 100) / 100;
+  const approved = Math.round(sums.Approved * 100) / 100;
+  const planned = Math.round(sums.Planned * 100) / 100;
+  const total = Math.round((paid + approved + planned) * 100) / 100;
+
+  const pct = (val) => (total > 0 ? Math.round((val / total) * 1000) / 10 : 0);
+
+  return {
+    total,
+    items: [
+      { key: "paid", label: "Paid", amount: paid, percent: pct(paid) },
+      { key: "approved", label: "Approved", amount: approved, percent: pct(approved) },
+      { key: "planned", label: "Planned", amount: planned, percent: pct(planned) }
+    ]
+  };
+}
+
+/**
+ * Projects end-of-year club spending based on earlier completed events plus the current event.
+ */
+function calculateYearEndForecast(forecast, currentEventActual, currentEventPlanned) {
+  const annualBudget = Math.round(forecast.annualBudget * 100) / 100;
+  const totalEventsInYear = Math.max(1, forecast.totalEventsInYear);
+  const priorEvents = Math.max(0, forecast.priorEventsCompleted);
+  const priorSpent = Math.round(forecast.priorEventsSpent * 100) / 100;
+
+  // Use actual spending for the current event once entered; otherwise fall back to planned budget
+  const currentEventCost = currentEventActual > 0 ? currentEventActual : currentEventPlanned;
+  const eventsCounted = priorEvents + 1;
+  const spentIncludingCurrent = Math.round((priorSpent + currentEventCost) * 100) / 100;
+  const avgCostPerEvent = Math.round((spentIncludingCurrent / eventsCounted) * 100) / 100;
+
+  const remainingEvents = Math.max(0, totalEventsInYear - eventsCounted);
+  const projectedYearEndSpend =
+    Math.round((spentIncludingCurrent + remainingEvents * avgCostPerEvent) * 100) / 100;
+  const projectedYearEndBalance =
+    Math.round((annualBudget - projectedYearEndSpend) * 100) / 100;
+
+  const annualCashLeft = Math.round((annualBudget - spentIncludingCurrent) * 100) / 100;
+  const safePerRemainingEvent =
+    remainingEvents > 0
+      ? Math.max(0, Math.round((annualCashLeft / remainingEvents) * 100) / 100)
+      : null;
+
+  const projectedUsagePercent =
+    annualBudget > 0
+      ? Math.round((projectedYearEndSpend / annualBudget) * 1000) / 10
+      : projectedYearEndSpend > 0
+        ? 100
+        : 0;
+  const progressBarWidth = Math.min(100, Math.max(0, projectedUsagePercent));
+
+  let tone = "good";
+  if (projectedYearEndBalance < 0) {
+    tone = "danger";
+  } else if (projectedUsagePercent >= 85) {
+    tone = "warning";
+  }
+
+  let advice = "";
+  if (annualBudget === 0) {
+    advice = "Enter your club's Annual Club Budget above to calculate your end-of-year forecast.";
+  } else if (annualCashLeft < 0) {
+    advice =
+      `Warning: Spending so far (${formatMoney(spentIncludingCurrent)}) already exceeds your annual budget by ${formatMoney(Math.abs(annualCashLeft))}. ` +
+      "You will need extra funding, sponsorships, or budget cuts before hosting more events.";
+  } else if (remainingEvents === 0) {
+    if (projectedYearEndBalance >= 0) {
+      advice =
+        `Final event of the year: You are on pace to finish with ${formatMoney(projectedYearEndBalance)} remaining in your annual club budget.`;
+    } else {
+      advice =
+        `Final event of the year: You are projected to finish ${formatMoney(Math.abs(projectedYearEndBalance))} over your annual budget.`;
+    }
+  } else if (projectedYearEndBalance < 0) {
+    const cutPerEvent = Math.max(0, Math.round((avgCostPerEvent - safePerRemainingEvent) * 100) / 100);
+    advice =
+      `Pace Alert: At ${formatMoney(avgCostPerEvent)}/event, you are projected to run short by ${formatMoney(Math.abs(projectedYearEndBalance))}. ` +
+      `Trim about ${formatMoney(cutPerEvent)} per event (aim for ${formatMoney(safePerRemainingEvent)} or less across your next ${remainingEvents} ${remainingEvents === 1 ? "event" : "events"}).`;
+  } else if (projectedUsagePercent >= 85) {
+    advice =
+      `Close Margin: You are projected to finish with ${formatMoney(projectedYearEndBalance)} left (${projectedUsagePercent}% used). ` +
+      `Keep your next ${remainingEvents} ${remainingEvents === 1 ? "event" : "events"} at or under ${formatMoney(safePerRemainingEvent)} each to stay safe.`;
+  } else {
+    advice =
+      `On Track: At ${formatMoney(avgCostPerEvent)}/event, you are projected to finish the year with a ${formatMoney(projectedYearEndBalance)} surplus. ` +
+      `You can safely budget up to ${formatMoney(safePerRemainingEvent)} for each of your remaining ${remainingEvents} ${remainingEvents === 1 ? "event" : "events"}.`;
+  }
+
+  return {
+    annualBudget,
+    eventsCounted,
+    remainingEvents,
+    spentIncludingCurrent,
+    avgCostPerEvent,
+    projectedYearEndSpend,
+    projectedYearEndBalance,
+    annualCashLeft,
+    safePerRemainingEvent,
+    projectedUsagePercent,
+    progressBarWidth,
+    tone,
+    advice
   };
 }
 
@@ -423,7 +607,7 @@ function buildTextSummary(state) {
 
 /* ==========================================================================
    3. PRESENTATION LAYER (DISPLAY & EVENTS)
-   Updates the DOM, displays errors, and connects user inputs.
+   Updates the DOM, renders charts & forecasts, and connects user inputs.
    ========================================================================== */
 
 // Cached DOM elements
@@ -470,6 +654,33 @@ const tableTotalPlannedEl = document.getElementById("table-total-planned");
 const tableTotalActualEl = document.getElementById("table-total-actual");
 const tableTotalRemainingEl = document.getElementById("table-total-remaining");
 const tableTotalStatusEl = document.getElementById("table-total-status");
+
+// Charts DOM elements
+const categoryChartEl = document.getElementById("category-chart");
+const approvalChartTotalEl = document.getElementById("approval-chart-total");
+const approvalStackedBarEl = document.getElementById("approval-stacked-bar");
+const approvalLegendEl = document.getElementById("approval-legend");
+
+// End-of-Year Forecast DOM elements
+const forecastAnnualBudgetInput = document.getElementById("forecast-annual-budget");
+const forecastTotalEventsInput = document.getElementById("forecast-total-events");
+const forecastPriorEventsInput = document.getElementById("forecast-prior-events");
+const forecastPriorSpentInput = document.getElementById("forecast-prior-spent");
+const forecastErrorMsg = document.getElementById("forecast-error-msg");
+const forecastAvgEventEl = document.getElementById("forecast-avg-event");
+const forecastEventsCountedEl = document.getElementById("forecast-events-counted");
+const forecastProjectedSpendEl = document.getElementById("forecast-projected-spend");
+const forecastRemainingEventsEl = document.getElementById("forecast-remaining-events");
+const forecastBalanceBoxEl = document.getElementById("forecast-balance-box");
+const forecastProjectedBalanceEl = document.getElementById("forecast-projected-balance");
+const forecastBalanceStatusEl = document.getElementById("forecast-balance-status");
+const forecastSafePerEventEl = document.getElementById("forecast-safe-per-event");
+const forecastCashLeftEl = document.getElementById("forecast-cash-left");
+const forecastUsagePercentEl = document.getElementById("forecast-usage-percent");
+const forecastUsageDetailEl = document.getElementById("forecast-usage-detail");
+const forecastProgressTrackEl = document.getElementById("forecast-progress-track");
+const forecastProgressFillEl = document.getElementById("forecast-progress-fill");
+const forecastAdviceEl = document.getElementById("forecast-advice");
 
 let exportStatusTimer = null;
 
@@ -554,6 +765,165 @@ function applyApprovalStyle(selectEl, status) {
   selectEl.classList.add(`approval-${status.toLowerCase()}`);
 }
 
+function renderCharts() {
+  // 1. Planned vs. Actual by Category horizontal bar chart
+  categoryChartEl.innerHTML = "";
+
+  if (appState.categories.length === 0) {
+    const emptyMsg = document.createElement("div");
+    emptyMsg.className = "chart-empty";
+    emptyMsg.textContent = "Add at least one expense category to see the Planned vs. Actual comparison chart.";
+    categoryChartEl.appendChild(emptyMsg);
+  } else {
+    const maxAmount = Math.max(
+      1,
+      ...appState.categories.map((cat) => Math.max(cat.planned, cat.actual))
+    );
+
+    for (const cat of appState.categories) {
+      const { remaining, isOver } = calculateCategoryStatus(cat);
+      const plannedWidth = Math.round((cat.planned / maxAmount) * 1000) / 10;
+      const actualWidth = Math.round((cat.actual / maxAmount) * 1000) / 10;
+
+      const rowEl = document.createElement("div");
+      rowEl.className = `chart-row${isOver ? " is-over" : ""}`;
+
+      const topEl = document.createElement("div");
+      topEl.className = "chart-row-top";
+
+      const nameEl = document.createElement("span");
+      nameEl.className = "chart-cat-name";
+      nameEl.textContent = cat.name;
+
+      const varianceEl = document.createElement("span");
+      varianceEl.className = `chart-variance ${isOver ? "over" : "ok"}`;
+      varianceEl.textContent = isOver
+        ? `${formatMoney(Math.abs(remaining))} over`
+        : `${formatMoney(remaining)} left`;
+
+      topEl.appendChild(nameEl);
+      topEl.appendChild(varianceEl);
+      rowEl.appendChild(topEl);
+
+      const pairEl = document.createElement("div");
+      pairEl.className = "bar-pair";
+
+      // Planned bar line
+      const plannedLine = document.createElement("div");
+      plannedLine.className = "bar-line";
+      plannedLine.innerHTML =
+        `<span class="bar-label">Planned</span>` +
+        `<div class="bar-track"><div class="bar-fill planned" style="width: ${plannedWidth}%"></div></div>` +
+        `<span class="bar-value">${formatMoney(cat.planned)}</span>`;
+
+      // Actual bar line
+      const actualLine = document.createElement("div");
+      actualLine.className = "bar-line";
+      actualLine.innerHTML =
+        `<span class="bar-label">Actual</span>` +
+        `<div class="bar-track"><div class="bar-fill ${isOver ? "actual-over" : "actual-ok"}" style="width: ${actualWidth}%"></div></div>` +
+        `<span class="bar-value">${formatMoney(cat.actual)}</span>`;
+
+      pairEl.appendChild(plannedLine);
+      pairEl.appendChild(actualLine);
+      rowEl.appendChild(pairEl);
+
+      categoryChartEl.appendChild(rowEl);
+    }
+  }
+
+  // 2. Actual Spending by Approval Status stacked bar
+  const breakdown = calculateApprovalBreakdown(appState.categories);
+  approvalChartTotalEl.textContent = `${formatMoney(breakdown.total)} total`;
+  approvalStackedBarEl.innerHTML = "";
+  approvalLegendEl.innerHTML = "";
+
+  if (breakdown.total > 0) {
+    for (const item of breakdown.items) {
+      if (item.amount > 0) {
+        const segment = document.createElement("div");
+        segment.className = `approval-segment ${item.key}`;
+        segment.style.width = `${item.percent}%`;
+        segment.title = `${item.label}: ${formatMoney(item.amount)} (${item.percent}%)`;
+        approvalStackedBarEl.appendChild(segment);
+      }
+    }
+  }
+
+  const swatchMap = {
+    paid: "swatch-paid",
+    approved: "swatch-approved",
+    planned: "swatch-unapproved"
+  };
+
+  for (const item of breakdown.items) {
+    const stat = document.createElement("div");
+    stat.className = "approval-stat";
+    stat.innerHTML =
+      `<div class="approval-stat-top"><span class="legend-swatch ${swatchMap[item.key]}"></span>${item.label}</div>` +
+      `<span class="approval-stat-val">${formatMoney(item.amount)}</span>` +
+      `<span class="approval-stat-pct">${item.percent}% of actual</span>`;
+    approvalLegendEl.appendChild(stat);
+  }
+}
+
+function renderForecast() {
+  const totals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
+  const result = calculateYearEndForecast(
+    appState.yearForecast,
+    totals.totalActual,
+    totals.overallPlanned
+  );
+
+  forecastAvgEventEl.textContent = formatMoney(result.avgCostPerEvent);
+  forecastEventsCountedEl.textContent =
+    `${result.eventsCounted} ${result.eventsCounted === 1 ? "event" : "events"} counted (incl. this one)`;
+
+  forecastProjectedSpendEl.textContent = formatMoney(result.projectedYearEndSpend);
+  forecastRemainingEventsEl.textContent =
+    result.remainingEvents === 0
+      ? "Final event of the year"
+      : `${result.remainingEvents} ${result.remainingEvents === 1 ? "event" : "events"} remaining`;
+
+  forecastProjectedBalanceEl.textContent =
+    result.projectedYearEndBalance >= 0
+      ? `+${formatMoney(result.projectedYearEndBalance)}`
+      : formatMoney(result.projectedYearEndBalance);
+  forecastBalanceStatusEl.textContent =
+    result.projectedYearEndBalance < 0
+      ? "Projected shortfall"
+      : result.tone === "warning"
+        ? "Tight margin"
+        : "Projected surplus";
+
+  forecastBalanceBoxEl.classList.remove("tone-good", "tone-warning", "tone-danger");
+  forecastBalanceBoxEl.classList.add(`tone-${result.tone}`);
+
+  forecastSafePerEventEl.textContent =
+    result.safePerRemainingEvent === null
+      ? "N/A"
+      : formatMoney(result.safePerRemainingEvent);
+  forecastCashLeftEl.textContent =
+    result.annualCashLeft >= 0
+      ? `${formatMoney(result.annualCashLeft)} annual budget left`
+      : `${formatMoney(Math.abs(result.annualCashLeft))} over annual budget`;
+
+  forecastUsagePercentEl.textContent = `${result.projectedUsagePercent}%`;
+  forecastUsageDetailEl.textContent =
+    `${formatMoney(result.projectedYearEndSpend)} of ${formatMoney(result.annualBudget)} USD`;
+  forecastProgressTrackEl.setAttribute(
+    "aria-valuenow",
+    String(Math.min(100, Math.max(0, Math.round(result.projectedUsagePercent))))
+  );
+  forecastProgressFillEl.style.width = `${result.progressBarWidth}%`;
+  forecastProgressFillEl.classList.remove("tone-good", "tone-warning", "tone-danger");
+  forecastProgressFillEl.classList.add(`tone-${result.tone}`);
+
+  forecastAdviceEl.textContent = result.advice;
+  forecastAdviceEl.classList.remove("tone-good", "tone-warning", "tone-danger");
+  forecastAdviceEl.classList.add(`tone-${result.tone}`);
+}
+
 function renderSummary() {
   // Overall event cards always calculate across ALL categories in the event
   const allTotals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
@@ -612,6 +982,10 @@ function renderSummary() {
     tableTotalRemainingEl.className = "num-col remaining-amount positive";
     tableTotalStatusEl.innerHTML = '<span class="status-badge ok">Within Budget</span>';
   }
+
+  // Keep charts and annual forecast live-synced with every budget update
+  renderCharts();
+  renderForecast();
 }
 
 function renderCategories() {
@@ -733,11 +1107,11 @@ function renderCategories() {
       const nextStatus = normalizeApprovalStatus(approvalSelect.value);
       applyApprovalStyle(approvalSelect, nextStatus);
       handleCategoryDetailChange(category.id, "approvalStatus", nextStatus);
-      // Re-render if an approval status filter is currently active
+      // Re-render table if filtered by approval status, and always update the approval chart
       if (filterState.approval !== "ALL") {
         renderCategories();
-        renderSummary();
       }
+      renderSummary();
     });
 
     approvalCell.appendChild(approvalSelect);
@@ -824,12 +1198,13 @@ function handleCategoryNameChange(categoryId, inputEl, rowEl) {
   category.name = trimmed;
   saveState();
 
-  // Keep screen-reader labels up to date without re-rendering and losing focus
+  // Keep screen-reader labels and charts up to date without losing table input focus
   inputEl.setAttribute("aria-label", `Category name for ${trimmed}`);
   const removeBtn = rowEl.querySelector(".btn-danger");
   if (removeBtn) {
     removeBtn.setAttribute("aria-label", `Remove ${trimmed} category`);
   }
+  renderCharts();
 }
 
 function handleCategoryDetailChange(categoryId, field, value) {
@@ -899,11 +1274,56 @@ function resetFilters() {
   filterOverCheckbox.checked = false;
 }
 
+function syncForecastInputs() {
+  forecastAnnualBudgetInput.value = appState.yearForecast.annualBudget;
+  forecastTotalEventsInput.value = appState.yearForecast.totalEventsInYear;
+  forecastPriorEventsInput.value = appState.yearForecast.priorEventsCompleted;
+  forecastPriorSpentInput.value = appState.yearForecast.priorEventsSpent;
+
+  forecastAnnualBudgetInput.classList.remove("input-invalid");
+  forecastTotalEventsInput.classList.remove("input-invalid");
+  forecastPriorEventsInput.classList.remove("input-invalid");
+  forecastPriorSpentInput.classList.remove("input-invalid");
+  clearError(forecastErrorMsg);
+}
+
+function handleForecastInputChange() {
+  const annualCheck = validateMoney(forecastAnnualBudgetInput.value, "Annual Club Budget");
+  const totalEventsCheck = validateWholeNumber(forecastTotalEventsInput.value, "Total Events This Year", 1);
+  const priorEventsCheck = validateWholeNumber(forecastPriorEventsInput.value, "Earlier Events Completed", 0);
+  const priorSpentCheck = validateMoney(forecastPriorSpentInput.value, "Spent Earlier This Year");
+
+  forecastAnnualBudgetInput.classList.toggle("input-invalid", !annualCheck.valid);
+  forecastTotalEventsInput.classList.toggle("input-invalid", !totalEventsCheck.valid);
+  forecastPriorEventsInput.classList.toggle("input-invalid", !priorEventsCheck.valid);
+  forecastPriorSpentInput.classList.toggle("input-invalid", !priorSpentCheck.valid);
+
+  const firstInvalid = [annualCheck, totalEventsCheck, priorEventsCheck, priorSpentCheck].find(
+    (check) => !check.valid
+  );
+
+  if (firstInvalid) {
+    showError(forecastErrorMsg, firstInvalid.message);
+    return;
+  }
+
+  clearError(forecastErrorMsg);
+  appState.yearForecast = {
+    annualBudget: annualCheck.value,
+    totalEventsInYear: totalEventsCheck.value,
+    priorEventsCompleted: priorEventsCheck.value,
+    priorEventsSpent: priorSpentCheck.value
+  };
+  saveState();
+  renderForecast();
+}
+
 function renderAll() {
   eventNameInput.value = appState.eventName;
   totalPlannedInput.value = appState.totalPlannedBudget;
   totalPlannedInput.classList.remove("input-invalid");
   clearError(budgetErrorMsg);
+  syncForecastInputs();
   renderCategories();
   renderSummary();
 }
@@ -967,6 +1387,11 @@ clearFiltersBtn.addEventListener("click", () => {
   renderCategories();
   renderSummary();
 });
+
+forecastAnnualBudgetInput.addEventListener("input", handleForecastInputChange);
+forecastTotalEventsInput.addEventListener("input", handleForecastInputChange);
+forecastPriorEventsInput.addEventListener("input", handleForecastInputChange);
+forecastPriorSpentInput.addEventListener("input", handleForecastInputChange);
 
 addCategoryForm.addEventListener("submit", (event) => {
   event.preventDefault();

@@ -11,7 +11,7 @@
     <div class="container header-inner">
       <div>
         <h1>Club Event Budget Tracker</h1>
-        <p class="subtitle">Compare planned event expenses against actual spending.</p>
+        <p class="subtitle">Compare planned event expenses against actual spending and forecast your year-end club budget.</p>
       </div>
     </div>
   </header>
@@ -262,6 +262,157 @@
         </div>
       </form>
       <p id="form-error-msg" class="error-message hidden" role="alert"></p>
+    </section>
+
+    <!-- Visual Charts & End-of-Year Forecast Dashboard -->
+    <section class="insights-grid" aria-label="Budget Charts and Annual Forecast">
+      <!-- Visual Charts Card -->
+      <article class="card insights-card" aria-labelledby="charts-heading">
+        <div class="insights-header">
+          <h2 id="charts-heading">Visual Spending Charts</h2>
+          <span class="muted-text">Updates live as you edit</span>
+        </div>
+
+        <div class="chart-block">
+          <div class="chart-block-header">
+            <h3>Planned vs. Actual by Category (USD)</h3>
+            <div class="chart-legend" aria-label="Chart legend">
+              <span class="legend-item"><span class="legend-swatch swatch-planned"></span>Planned</span>
+              <span class="legend-item"><span class="legend-swatch swatch-actual"></span>Actual (Within)</span>
+              <span class="legend-item"><span class="legend-swatch swatch-over"></span>Actual (Over)</span>
+            </div>
+          </div>
+          <div id="category-chart" class="category-chart" aria-live="polite">
+            <!-- Category comparison bars are rendered here by script.js -->
+          </div>
+        </div>
+
+        <div class="chart-block approval-chart-block">
+          <div class="chart-block-header">
+            <h3>Actual Spending by Approval Status (USD)</h3>
+            <span id="approval-chart-total" class="muted-text">$0.00 total</span>
+          </div>
+          <div
+            id="approval-stacked-bar"
+            class="approval-stacked-bar"
+            role="img"
+            aria-label="Breakdown of actual spending by approval status"
+          >
+            <!-- Stacked approval segments are rendered here by script.js -->
+          </div>
+          <div id="approval-legend" class="approval-legend">
+            <!-- Approval breakdown items are rendered here by script.js -->
+          </div>
+        </div>
+      </article>
+
+      <!-- End-of-Year Club Budget Forecast Card -->
+      <article class="card insights-card" aria-labelledby="forecast-heading">
+        <div class="insights-header">
+          <h2 id="forecast-heading">End-of-Year Club Forecast</h2>
+          <span class="muted-text">Auto-calculates your annual math</span>
+        </div>
+
+        <p class="forecast-intro">
+          Enter your club's annual numbers below to see if your current spending pace will last through the final event of the year.
+        </p>
+
+        <div class="forecast-inputs">
+          <div class="field-group">
+            <label for="forecast-annual-budget">Annual Club Budget (USD)</label>
+            <input
+              type="number"
+              id="forecast-annual-budget"
+              min="0"
+              step="0.01"
+              placeholder="6000.00"
+            />
+          </div>
+
+          <div class="field-group">
+            <label for="forecast-total-events">Total Events This Year</label>
+            <input
+              type="number"
+              id="forecast-total-events"
+              min="1"
+              step="1"
+              placeholder="6"
+            />
+          </div>
+
+          <div class="field-group">
+            <label for="forecast-prior-events">Earlier Events Completed</label>
+            <input
+              type="number"
+              id="forecast-prior-events"
+              min="0"
+              step="1"
+              placeholder="2"
+            />
+          </div>
+
+          <div class="field-group">
+            <label for="forecast-prior-spent">Spent Earlier This Year (USD)</label>
+            <input
+              type="number"
+              id="forecast-prior-spent"
+              min="0"
+              step="0.01"
+              placeholder="1850.00"
+            />
+          </div>
+        </div>
+
+        <p id="forecast-error-msg" class="error-message hidden" role="alert"></p>
+
+        <div class="forecast-metrics">
+          <div class="forecast-metric-box">
+            <span class="forecast-metric-label">Avg. Cost / Event</span>
+            <strong id="forecast-avg-event" class="forecast-metric-value">$0.00</strong>
+            <span id="forecast-events-counted" class="forecast-metric-sub">0 events counted</span>
+          </div>
+
+          <div class="forecast-metric-box">
+            <span class="forecast-metric-label">Projected Year-End Spend</span>
+            <strong id="forecast-projected-spend" class="forecast-metric-value">$0.00</strong>
+            <span id="forecast-remaining-events" class="forecast-metric-sub">0 events left</span>
+          </div>
+
+          <div id="forecast-balance-box" class="forecast-metric-box">
+            <span class="forecast-metric-label">Projected Year-End Balance</span>
+            <strong id="forecast-projected-balance" class="forecast-metric-value">$0.00</strong>
+            <span id="forecast-balance-status" class="forecast-metric-sub">On track</span>
+          </div>
+
+          <div class="forecast-metric-box">
+            <span class="forecast-metric-label">Safe Budget / Remaining Event</span>
+            <strong id="forecast-safe-per-event" class="forecast-metric-value">$0.00</strong>
+            <span id="forecast-cash-left" class="forecast-metric-sub">$0.00 annual cash left</span>
+          </div>
+        </div>
+
+        <div class="forecast-bar-wrap">
+          <div class="progress-header">
+            <span class="progress-title">Projected Annual Usage: <strong id="forecast-usage-percent">0%</strong></span>
+            <span id="forecast-usage-detail" class="muted-text">$0.00 of $0.00 USD</span>
+          </div>
+          <div
+            id="forecast-progress-track"
+            class="progress-track"
+            role="progressbar"
+            aria-label="Projected percentage of annual club budget used"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <div id="forecast-progress-fill" class="progress-fill tone-good"></div>
+          </div>
+        </div>
+
+        <div id="forecast-advice" class="forecast-advice tone-good" role="status" aria-live="polite">
+          Enter your annual budget and event count to see a year-end recommendation.
+        </div>
+      </article>
     </section>
   </main>
 
