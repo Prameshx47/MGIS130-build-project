@@ -10,7 +10,7 @@
   <header class="site-header">
     <div class="container">
       <h1>Club Event Budget Tracker</h1>
-      <p class="subtitle">Compare planned event expenses against actual spending.</p>
+      <p class="subtitle">Compare planned event expenses against actual spending. All amounts are in U.S. dollars (USD).</p>
     </div>
   </header>
 
@@ -45,7 +45,7 @@
 
       <div class="summary-grid">
         <article class="card summary-card">
-          <label for="total-planned-input" class="summary-label">Total Planned Budget</label>
+          <label for="total-planned-input" class="summary-label">Total Planned Budget (USD)</label>
           <div class="budget-input-wrap">
             <span class="currency-prefix" aria-hidden="true">$</span>
             <input
@@ -55,22 +55,23 @@
               min="0"
               step="0.01"
               placeholder="0.00"
-              aria-label="Total planned event budget in dollars"
+              aria-label="Total planned event budget in U.S. dollars (USD)"
             />
           </div>
         </article>
 
         <article class="card summary-card">
-          <span class="summary-label">Total Actual</span>
+          <span class="summary-label">Total Actual (USD)</span>
           <strong id="total-actual" class="summary-value">$0.00</strong>
         </article>
 
         <article id="remaining-card" class="card summary-card">
-          <span class="summary-label">Remaining Balance</span>
+          <span class="summary-label">Remaining Balance (USD)</span>
           <strong id="total-remaining" class="summary-value">$0.00</strong>
         </article>
       </div>
 
+      <p id="budget-allocation-notice" class="info-banner hidden" role="status" aria-live="polite"></p>
       <p id="budget-error-msg" class="error-message hidden" role="alert"></p>
     </section>
 
@@ -117,7 +118,7 @@
         </div>
 
         <div class="field-group">
-          <label for="new-planned-amount">Planned ($)</label>
+          <label for="new-planned-amount">Planned (USD)</label>
           <input
             type="number"
             id="new-planned-amount"
@@ -129,7 +130,7 @@
         </div>
 
         <div class="field-group">
-          <label for="new-actual-amount">Actual ($)</label>
+          <label for="new-actual-amount">Actual (USD)</label>
           <input
             type="number"
             id="new-actual-amount"
@@ -151,7 +152,10 @@
     <section class="card" aria-labelledby="categories-heading">
       <div class="section-header">
         <h2 id="categories-heading">Expense Breakdown</h2>
-        <span id="category-count" class="muted-text">0 categories</span>
+        <div class="section-actions">
+          <span id="category-count" class="muted-text">0 categories</span>
+          <button type="button" id="export-csv-btn" class="btn btn-secondary">Export CSV</button>
+        </div>
       </div>
 
       <p id="table-error-msg" class="error-message hidden" role="alert"></p>
@@ -164,9 +168,9 @@
               <th scope="col">Date</th>
               <th scope="col">Notes / Vendor</th>
               <th scope="col">Approval</th>
-              <th scope="col" class="num-col">Planned ($)</th>
-              <th scope="col" class="num-col">Actual ($)</th>
-              <th scope="col" class="num-col">Remaining ($)</th>
+              <th scope="col" class="num-col">Planned (USD)</th>
+              <th scope="col" class="num-col">Actual (USD)</th>
+              <th scope="col" class="num-col">Remaining (USD)</th>
               <th scope="col">Budget Status</th>
               <th scope="col" class="action-col">Action</th>
             </tr>
