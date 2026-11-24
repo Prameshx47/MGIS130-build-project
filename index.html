@@ -124,6 +124,41 @@
         </div>
       </div>
 
+      <!-- Search & Filter Bar -->
+      <div class="filter-bar" role="region" aria-label="Filter expense categories">
+        <div class="filter-search-wrap">
+          <input
+            type="search"
+            id="filter-search-input"
+            placeholder="Search category or vendor..."
+            aria-label="Search by category name or vendor notes"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="filter-select-wrap">
+          <select id="filter-approval-select" aria-label="Filter by approval status">
+            <option value="ALL">All Approvals</option>
+            <option value="Planned">Planned</option>
+            <option value="Approved">Approved</option>
+            <option value="Paid">Paid</option>
+          </select>
+        </div>
+
+        <label class="filter-checkbox-label" for="filter-over-checkbox">
+          <input type="checkbox" id="filter-over-checkbox" />
+          <span>Over Budget Only</span>
+        </label>
+
+        <button
+          type="button"
+          id="clear-filters-btn"
+          class="btn btn-secondary btn-compact hidden"
+        >
+          Clear Filters
+        </button>
+      </div>
+
       <p id="export-status-msg" class="status-message hidden" role="status" aria-live="polite"></p>
       <p id="table-error-msg" class="error-message hidden" role="alert"></p>
 
@@ -147,7 +182,7 @@
           </tbody>
           <tfoot>
             <tr class="totals-row">
-              <th scope="row" colspan="4">Total</th>
+              <th id="table-total-label" scope="row" colspan="4">Total</th>
               <td id="table-total-planned" class="num-col">$0.00</td>
               <td id="table-total-actual" class="num-col">$0.00</td>
               <td id="table-total-remaining" class="num-col">$0.00</td>

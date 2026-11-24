@@ -143,6 +143,7 @@ label {
 }
 
 input[type="text"],
+input[type="search"],
 input[type="number"],
 input[type="date"],
 select {
@@ -159,6 +160,7 @@ select {
 }
 
 input[type="text"]:focus,
+input[type="search"]:focus,
 input[type="number"]:focus,
 input[type="date"]:focus,
 select:focus {
@@ -373,6 +375,58 @@ input.input-invalid {
   gap: 8px;
 }
 
+/* Search & Filter Bar */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background-color: #f8f9fa;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+}
+
+.filter-search-wrap {
+  flex: 1 1 200px;
+}
+
+.filter-select-wrap {
+  flex: 0 1 155px;
+}
+
+.filter-bar input[type="search"],
+.filter-bar select {
+  min-height: 32px;
+  padding: 4px 9px;
+  font-size: 0.84rem;
+}
+
+.filter-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 10px;
+  background-color: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: var(--text-main);
+  cursor: pointer;
+  user-select: none;
+}
+
+.filter-checkbox-label input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
 /* Excel-Style Spreadsheet Table */
 .table-wrapper {
   width: 100%;
@@ -489,6 +543,11 @@ input.input-invalid {
   min-width: 155px;
 }
 
+.budget-table tbody input.category-name-input {
+  font-weight: 600;
+  min-width: 135px;
+}
+
 .budget-table tbody input[type="date"] {
   min-width: 132px;
 }
@@ -496,11 +555,6 @@ input.input-invalid {
 .budget-table tbody input.input-invalid {
   border-color: var(--danger-text);
   background-color: #ffffff;
-}
-
-.category-name-cell {
-  font-weight: 600;
-  min-width: 120px;
 }
 
 /* Approval Status Dropdown */

@@ -43,6 +43,13 @@ const DEFAULT_STATE = {
 // Active application state
 let appState = loadState();
 
+// Active search & filter settings (view-only; does not alter saved budget data)
+let filterState = {
+  search: "",
+  approval: "ALL",
+  overBudgetOnly: false
+};
+
 function loadState() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -63,7 +70,7 @@ function loadState() {
           parsed.totalPlannedBudget = Math.round(categorySum * 100) / 100;
         }
 
-        // Fill in new detail fields (date, notes, approvalStatus) for older saved rows
+        // Fill in detail fields (date, notes, approvalStatus) for older saved rows
         parsed.categories = parsed.categories.map((item) => ({
           ...item,
           date: typeof item.date === "string" ? item.date : "",
@@ -99,7 +106,7 @@ function cloneDefaultState() {
 
 /* ==========================================================================
    2. PROCESSING LAYER (RULES & CALCULATIONS)
-   Handles validation, currency formatting, and budget math.
+   Handles validation, currency formatting, filtering, and budget math.
    ========================================================================== */
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
@@ -148,9 +155,52 @@ function calculateCategoryStatus(category) {
 }
 
 /**
+ * Returns true when any table search or filter control is active.
+ */
+function hasActiveFilters(filters) {
+  return (
+    filters.search.trim() !== "" ||
+    filters.approval !== "ALL" ||
+    Boolean(filters.overBudgetOnly)
+  );
+}
+
+/**
+ * Filters category rows by search keyword (category name or notes/vendor),
+ * approval status, and over-budget status.
+ */
+function getFilteredCategories(categories, filters) {
+  const query = filters.search.trim().toLowerCase();
+
+  return categories.filter((cat) => {
+    if (query) {
+      const nameMatch = cat.name.toLowerCase().includes(query);
+      const notesMatch = (cat.notes || "").toLowerCase().includes(query);
+      if (!nameMatch && !notesMatch) {
+        return false;
+      }
+    }
+
+    if (filters.approval !== "ALL") {
+      if (normalizeApprovalStatus(cat.approvalStatus) !== filters.approval) {
+        return false;
+      }
+    }
+
+    if (filters.overBudgetOnly) {
+      if (!calculateCategoryStatus(cat).isOver) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+/**
  * Calculates both:
  * 1) Overall event totals (comparing total actual spending against the editable Total Planned Budget)
- * 2) Table totals (summing the individual category rows)
+ * 2) Table totals (summing the provided category rows)
  * 3) Progress bar metrics and plan mismatch status
  */
 function calculateEventTotals(categories, totalPlannedBudget) {
@@ -211,14 +261,16 @@ function calculateEventTotals(categories, totalPlannedBudget) {
 }
 
 /**
- * Wraps a CSV cell safely if it contains commas, quotes, or line breaks.
+ * Prevents spreadsheet programs from treating user-entered text as a formula.
  */
 function sanitizeSpreadsheetText(value) {
   const text = String(value ?? "");
-  // Prevent spreadsheet programs from treating user-entered text as a formula.
   return /^[\s]*[=+\-@]/.test(text) ? `'${text}` : text;
 }
 
+/**
+ * Wraps a CSV cell safely if it contains commas, quotes, or line breaks.
+ */
 function escapeCsvValue(value) {
   const text = String(value ?? "");
   if (/[",\r\n]/.test(text)) {
@@ -396,6 +448,11 @@ const budgetMismatchBanner = document.getElementById("budget-mismatch-banner");
 const budgetMismatchText = document.getElementById("budget-mismatch-text");
 const syncBudgetBtn = document.getElementById("sync-budget-btn");
 
+const filterSearchInput = document.getElementById("filter-search-input");
+const filterApprovalSelect = document.getElementById("filter-approval-select");
+const filterOverCheckbox = document.getElementById("filter-over-checkbox");
+const clearFiltersBtn = document.getElementById("clear-filters-btn");
+
 const addCategoryForm = document.getElementById("add-category-form");
 const newCategoryNameInput = document.getElementById("new-category-name");
 const newExpenseDateInput = document.getElementById("new-expense-date");
@@ -408,6 +465,7 @@ const formErrorMsg = document.getElementById("form-error-msg");
 const tableErrorMsg = document.getElementById("table-error-msg");
 const categoryCountEl = document.getElementById("category-count");
 const categoriesTbody = document.getElementById("categories-tbody");
+const tableTotalLabelEl = document.getElementById("table-total-label");
 const tableTotalPlannedEl = document.getElementById("table-total-planned");
 const tableTotalActualEl = document.getElementById("table-total-actual");
 const tableTotalRemainingEl = document.getElementById("table-total-remaining");
@@ -497,17 +555,17 @@ function applyApprovalStyle(selectEl, status) {
 }
 
 function renderSummary() {
-  const totals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
+  // Overall event cards always calculate across ALL categories in the event
+  const allTotals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
 
-  // Update top summary cards (compared against the editable Total Planned Budget)
-  totalActualEl.textContent = formatMoney(totals.totalActual);
-  totalRemainingEl.textContent = formatMoney(totals.overallRemaining);
+  totalActualEl.textContent = formatMoney(allTotals.totalActual);
+  totalRemainingEl.textContent = formatMoney(allTotals.overallRemaining);
 
   remainingCardEl.classList.remove("status-good", "status-over");
 
-  if (totals.isOverallOverBudget) {
+  if (allTotals.isOverallOverBudget) {
     remainingCardEl.classList.add("status-over");
-    eventOverAmount.textContent = formatMoney(Math.abs(totals.overallRemaining));
+    eventOverAmount.textContent = formatMoney(Math.abs(allTotals.overallRemaining));
     eventAlertBanner.classList.remove("hidden");
   } else {
     remainingCardEl.classList.add("status-good");
@@ -515,31 +573,39 @@ function renderSummary() {
   }
 
   // Update the visual budget usage progress bar
-  progressPercentEl.textContent = `${totals.usedPercent}%`;
-  progressDetailEl.textContent = `${formatMoney(totals.totalActual)} of ${formatMoney(totals.overallPlanned)} USD`;
-  progressTrackEl.setAttribute("aria-valuenow", String(Math.min(100, Math.max(0, Math.round(totals.usedPercent)))));
-  progressFillEl.style.width = `${totals.progressBarWidth}%`;
+  progressPercentEl.textContent = `${allTotals.usedPercent}%`;
+  progressDetailEl.textContent = `${formatMoney(allTotals.totalActual)} of ${formatMoney(allTotals.overallPlanned)} USD`;
+  progressTrackEl.setAttribute(
+    "aria-valuenow",
+    String(Math.min(100, Math.max(0, Math.round(allTotals.usedPercent))))
+  );
+  progressFillEl.style.width = `${allTotals.progressBarWidth}%`;
   progressFillEl.classList.remove("tone-good", "tone-warning", "tone-danger");
-  progressFillEl.classList.add(`tone-${totals.progressTone}`);
+  progressFillEl.classList.add(`tone-${allTotals.progressTone}`);
 
   // Show or hide the mismatch notice when overall budget != sum of category plans
-  if (totals.hasPlanMismatch) {
+  if (allTotals.hasPlanMismatch) {
     budgetMismatchText.textContent =
-      `Note: Total Planned Budget (${formatMoney(totals.overallPlanned)} USD) differs from the sum of category plans (${formatMoney(totals.categoriesPlanned)} USD).`;
+      `Note: Total Planned Budget (${formatMoney(allTotals.overallPlanned)} USD) differs from the sum of category plans (${formatMoney(allTotals.categoriesPlanned)} USD).`;
     budgetMismatchBanner.classList.remove("hidden");
   } else {
     budgetMismatchBanner.classList.add("hidden");
   }
 
-  // Update the bottom Totals row inside the budget table (sum of all categories)
-  tableTotalPlannedEl.textContent = formatMoney(totals.categoriesPlanned);
-  tableTotalActualEl.textContent = formatMoney(totals.totalActual);
-  tableTotalRemainingEl.textContent = formatMoney(totals.tableRemaining);
+  // Table footer sums the currently visible (filtered) rows so the column math always matches
+  const isFiltered = hasActiveFilters(filterState);
+  const visibleCategories = getFilteredCategories(appState.categories, filterState);
+  const tableTotals = calculateEventTotals(visibleCategories, appState.totalPlannedBudget);
 
-  if (!totals.hasCategories) {
+  tableTotalLabelEl.textContent = isFiltered ? "Filtered Total" : "Total";
+  tableTotalPlannedEl.textContent = formatMoney(tableTotals.categoriesPlanned);
+  tableTotalActualEl.textContent = formatMoney(tableTotals.totalActual);
+  tableTotalRemainingEl.textContent = formatMoney(tableTotals.tableRemaining);
+
+  if (!tableTotals.hasCategories) {
     tableTotalRemainingEl.className = "num-col remaining-amount neutral";
     tableTotalStatusEl.innerHTML = '<span class="status-badge neutral">No Expenses</span>';
-  } else if (totals.isTableOverBudget) {
+  } else if (tableTotals.isTableOverBudget) {
     tableTotalRemainingEl.className = "num-col remaining-amount negative";
     tableTotalStatusEl.innerHTML = '<span class="status-badge over">Over Budget</span>';
   } else {
@@ -549,25 +615,47 @@ function renderSummary() {
 }
 
 function renderCategories() {
-  const count = appState.categories.length;
-  categoryCountEl.textContent = `${count} ${count === 1 ? "category" : "categories"}`;
+  const totalCount = appState.categories.length;
+  const isFiltered = hasActiveFilters(filterState);
+  const visibleCategories = getFilteredCategories(appState.categories, filterState);
+
+  clearFiltersBtn.classList.toggle("hidden", !isFiltered);
+
+  if (isFiltered && totalCount > 0) {
+    categoryCountEl.textContent = `Showing ${visibleCategories.length} of ${totalCount} ${totalCount === 1 ? "category" : "categories"}`;
+  } else {
+    categoryCountEl.textContent = `${totalCount} ${totalCount === 1 ? "category" : "categories"}`;
+  }
 
   categoriesTbody.innerHTML = "";
 
-  if (count === 0) {
+  if (totalCount === 0) {
     const emptyRow = document.createElement("tr");
     const emptyCell = document.createElement("td");
     emptyCell.colSpan = 9;
     emptyCell.className = "empty-cell";
     emptyCell.innerHTML =
       '<span class="empty-state-title">No expense categories yet</span>' +
-      "Use the form above to add a category, or click Reset Demo Data to load sample numbers.";
+      "Use the form below to add a category, or click Reset Demo Data to load sample numbers.";
     emptyRow.appendChild(emptyCell);
     categoriesTbody.appendChild(emptyRow);
     return;
   }
 
-  for (const category of appState.categories) {
+  if (visibleCategories.length === 0) {
+    const emptyRow = document.createElement("tr");
+    const emptyCell = document.createElement("td");
+    emptyCell.colSpan = 9;
+    emptyCell.className = "empty-cell";
+    emptyCell.innerHTML =
+      '<span class="empty-state-title">No matching expense categories</span>' +
+      "Try adjusting your search text or click Clear Filters to see all rows.";
+    emptyRow.appendChild(emptyCell);
+    categoriesTbody.appendChild(emptyRow);
+    return;
+  }
+
+  for (const category of visibleCategories) {
     const { remaining, isOver } = calculateCategoryStatus(category);
 
     const row = document.createElement("tr");
@@ -576,10 +664,27 @@ function renderCategories() {
       row.classList.add("over-budget");
     }
 
-    // 1. Category Name cell
+    // 1. Editable Category Name cell
     const nameCell = document.createElement("td");
-    nameCell.className = "category-name-cell";
-    nameCell.textContent = category.name;
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "category-name-input";
+    nameInput.value = category.name;
+    nameInput.placeholder = "Category name";
+    nameInput.setAttribute("aria-label", `Category name for ${category.name}`);
+
+    nameInput.addEventListener("input", () => {
+      handleCategoryNameChange(category.id, nameInput, row);
+    });
+    nameInput.addEventListener("blur", () => {
+      if (!nameInput.value.trim()) {
+        nameInput.value = category.name;
+        nameInput.classList.remove("input-invalid");
+        clearError(tableErrorMsg);
+      }
+    });
+
+    nameCell.appendChild(nameInput);
     row.appendChild(nameCell);
 
     // 2. Date cell
@@ -628,6 +733,11 @@ function renderCategories() {
       const nextStatus = normalizeApprovalStatus(approvalSelect.value);
       applyApprovalStyle(approvalSelect, nextStatus);
       handleCategoryDetailChange(category.id, "approvalStatus", nextStatus);
+      // Re-render if an approval status filter is currently active
+      if (filterState.approval !== "ALL") {
+        renderCategories();
+        renderSummary();
+      }
     });
 
     approvalCell.appendChild(approvalSelect);
@@ -697,6 +807,31 @@ function renderCategories() {
   }
 }
 
+function handleCategoryNameChange(categoryId, inputEl, rowEl) {
+  const trimmed = inputEl.value.trim();
+  if (!trimmed) {
+    inputEl.classList.add("input-invalid");
+    showError(tableErrorMsg, "Category name cannot be empty.");
+    return;
+  }
+
+  inputEl.classList.remove("input-invalid");
+  clearError(tableErrorMsg);
+
+  const category = appState.categories.find((item) => item.id === categoryId);
+  if (!category) return;
+
+  category.name = trimmed;
+  saveState();
+
+  // Keep screen-reader labels up to date without re-rendering and losing focus
+  inputEl.setAttribute("aria-label", `Category name for ${trimmed}`);
+  const removeBtn = rowEl.querySelector(".btn-danger");
+  if (removeBtn) {
+    removeBtn.setAttribute("aria-label", `Remove ${trimmed} category`);
+  }
+}
+
 function handleCategoryDetailChange(categoryId, field, value) {
   const category = appState.categories.find((item) => item.id === categoryId);
   if (!category) return;
@@ -753,6 +888,17 @@ function removeCategory(categoryId) {
   renderSummary();
 }
 
+function resetFilters() {
+  filterState = {
+    search: "",
+    approval: "ALL",
+    overBudgetOnly: false
+  };
+  filterSearchInput.value = "";
+  filterApprovalSelect.value = "ALL";
+  filterOverCheckbox.checked = false;
+}
+
 function renderAll() {
   eventNameInput.value = appState.eventName;
   totalPlannedInput.value = appState.totalPlannedBudget;
@@ -795,6 +941,30 @@ syncBudgetBtn.addEventListener("click", () => {
   totalPlannedInput.classList.remove("input-invalid");
   clearError(budgetErrorMsg);
   saveState();
+  renderSummary();
+});
+
+filterSearchInput.addEventListener("input", () => {
+  filterState.search = filterSearchInput.value;
+  renderCategories();
+  renderSummary();
+});
+
+filterApprovalSelect.addEventListener("change", () => {
+  filterState.approval = filterApprovalSelect.value;
+  renderCategories();
+  renderSummary();
+});
+
+filterOverCheckbox.addEventListener("change", () => {
+  filterState.overBudgetOnly = filterOverCheckbox.checked;
+  renderCategories();
+  renderSummary();
+});
+
+clearFiltersBtn.addEventListener("click", () => {
+  resetFilters();
+  renderCategories();
   renderSummary();
 });
 
@@ -848,6 +1018,7 @@ addCategoryForm.addEventListener("submit", (event) => {
 
 resetDemoBtn.addEventListener("click", () => {
   appState = cloneDefaultState();
+  resetFilters();
   saveState();
   clearError(budgetErrorMsg);
   clearError(formErrorMsg);
