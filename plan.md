@@ -17,7 +17,7 @@ the amount remaining for each category and the whole event.
 - Enter a planned amount and actual spending for each category.
 - Show total planned spending, total actual spending, and the amount remaining.
 - Clearly flag categories or events that are over budget.
-- Format amounts in Canadian dollars and support phone screens.
+- Format amounts in U.S. dollars (USD) and support phone screens.
 
 ## Calculation
 Remaining = planned amount minus actual spending.
