@@ -1,42 +1,44 @@
 # Club Event Budget Tracker
 
-A small web app for comparing planned event expenses with actual spending. It helps a club treasurer see category-level overspending and the event's remaining budget in one place.
+A small web app for student club treasurers to compare an event budget with category-level planned and actual expenses.
 
-**Live demo:** [Open the Club Event Budget Tracker](https://prameshx47.github.io/MGIS130-build-project/)
+## Problem and user
+
+A treasurer needs to see whether an event is staying within its approved budget and which expense categories need attention. This tracker makes the event total and category differences visible in one place.
 
 ## Features
 
-- Enter an event name.
-- Add or remove expense categories.
-- Edit planned and actual amounts.
-- View remaining amounts and status for each category.
-- See event totals and an alert when total spending is over budget.
-- Save changes automatically in the current browser on the current device.
-- Restore the fictional starting example with **Reset Demo Data**.
-- Display amounts in U.S. dollars (USD).
+- Set an event name and overall planned budget.
+- Add expense categories with date, vendor or notes, approval status, planned amount, and actual amount.
+- See remaining balances and over-budget alerts for the whole event and each category.
+- Get a notice when category plans do not add up to the event budget.
+- Export the current event and category details to a USD-labeled CSV file.
+- Save changes automatically in the current browser using local storage.
+- Use a fictional sample event or reset to the sample data.
 
-## How to use
+All currency values are in U.S. dollars (USD). The CSV is created locally in the browser; the app does not upload your budget data.
 
-1. Open the [live demo](https://prameshx47.github.io/MGIS130-build-project/).
-2. Enter an event name.
-3. Add a category with its planned and actual amounts, or edit an existing category.
-4. Review the remaining amount and budget status. Add or remove categories as needed.
-5. Select **Reset Demo Data** to restore the sample event.
+## Run locally or publish
 
-## Calculation
+Open `index.html` in a browser, or publish the repository with GitHub Pages. No build step, API key, or paid service is required.
 
-`Remaining = Planned amount - Actual amount`
+## Use
 
-- A positive remaining amount means money is left in the category or event budget.
-- Zero means the amount is on budget.
-- A negative amount means actual spending is over budget.
+1. Enter the event name and total planned budget.
+2. Add each expense category with its planned and actual amounts.
+3. Update the date, vendor/notes, or approval status in the table.
+4. Review the event alert and category allocation notice.
+5. Select **Export CSV** to download a spreadsheet-compatible report.
 
-The event total can remain under budget even when one category is over its plan. Check both the category status and the overall event summary.
+The app saves data on the current device and browser. It does not sync data between devices or users.
 
-## Data and project limits
+## Project files
 
-The app saves entries in browser storage on the device where they were entered. It does not send the budget to a server, and this version does not share data between people or devices. Clearing browser data may remove saved entries. Use fictional amounts for demonstrations; this project is not connected to club accounts or payment systems.
+- `index.html` — page structure and form
+- `style.css` — responsive styling
+- `script.js` — browser storage, validation, budget calculations, rendering, and CSV export
+- `plan.md` — project scope and milestones
 
-## Built with
+## Sample data
 
-HTML, CSS, and JavaScript. The app is hosted as a static GitHub Pages site and does not require an API key or paid service.
+The default event and expenses are fictional demonstration data. Replace them with your own event data when using the tracker.
