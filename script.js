@@ -151,6 +151,7 @@ function calculateCategoryStatus(category) {
  * Calculates both:
  * 1) Overall event totals (comparing total actual spending against the editable Total Planned Budget)
  * 2) Table totals (summing the individual category rows)
+ * 3) Progress bar metrics and plan mismatch status
  */
 function calculateEventTotals(categories, totalPlannedBudget) {
   let categoriesPlanned = 0;
@@ -172,6 +173,26 @@ function calculateEventTotals(categories, totalPlannedBudget) {
   const hasCategories = categories.length > 0;
   const isTableOverBudget = hasCategories && totalActual > categoriesPlanned;
 
+  // Calculate percentage of overall budget used for the progress bar
+  const usedPercent =
+    overallPlanned > 0
+      ? Math.round((totalActual / overallPlanned) * 1000) / 10
+      : totalActual > 0
+        ? 100
+        : 0;
+  const progressBarWidth = Math.min(100, Math.max(0, usedPercent));
+
+  let progressTone = "good";
+  if (isOverallOverBudget) {
+    progressTone = "danger";
+  } else if (usedPercent >= 80) {
+    progressTone = "warning";
+  }
+
+  // Check whether the editable overall budget differs from the sum of category plans
+  const budgetDifference = Math.round((overallPlanned - categoriesPlanned) * 100) / 100;
+  const hasPlanMismatch = hasCategories && Math.abs(budgetDifference) >= 0.01;
+
   return {
     overallPlanned,
     overallRemaining,
@@ -180,63 +201,171 @@ function calculateEventTotals(categories, totalPlannedBudget) {
     totalActual,
     tableRemaining,
     hasCategories,
-    isTableOverBudget
+    isTableOverBudget,
+    usedPercent,
+    progressBarWidth,
+    progressTone,
+    budgetDifference,
+    hasPlanMismatch
   };
 }
 
-
 /**
- * Exports the current event and its expense categories as a local CSV download.
- * Text fields are protected against spreadsheet formula injection.
+ * Wraps a CSV cell safely if it contains commas, quotes, or line breaks.
  */
-function csvCell(value) {
-  let text = String(value ?? "");
-  if (/^\s*[=+\-@]/.test(text)) {
-    text = "'" + text;
-  }
-  return '"' + text.replace(/"/g, '""') + '"';
+function sanitizeSpreadsheetText(value) {
+  const text = String(value ?? "");
+  // Prevent spreadsheet programs from treating user-entered text as a formula.
+  return /^[\s]*[=+\-@]/.test(text) ? `'${text}` : text;
 }
 
-function exportBudgetCsv() {
-  const totals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
-  const rows = [
-    ["Event", csvCell(appState.eventName)],
-    ["Event Budget (USD)", totals.overallPlanned.toFixed(2)],
-    ["Total Actual (USD)", totals.totalActual.toFixed(2)],
-    ["Remaining Balance (USD)", totals.overallRemaining.toFixed(2)],
-    [],
-    ["Category", "Date", "Notes / Vendor", "Approval Status", "Planned (USD)", "Actual (USD)", "Remaining (USD)", "Budget Status"]
-  ];
-
-  for (const category of appState.categories) {
-    const { remaining, isOver } = calculateCategoryStatus(category);
-    rows.push([
-      csvCell(category.name),
-      csvCell(category.date),
-      csvCell(category.notes),
-      csvCell(normalizeApprovalStatus(category.approvalStatus)),
-      category.planned.toFixed(2),
-      category.actual.toFixed(2),
-      remaining.toFixed(2),
-      csvCell(isOver ? "Over Budget" : "Within Budget")
-    ]);
+function escapeCsvValue(value) {
+  const text = String(value ?? "");
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
   }
+  return text;
+}
 
-  const csv = "\uFEFF" + rows.map((row) => row.join(",")).join("\r\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  const eventSlug = (appState.eventName || "event")
+/**
+ * Cleans tabs and line breaks so a cell pastes neatly into Excel or Google Sheets.
+ */
+function sanitizeTsvCell(value) {
+  return String(value ?? "").replace(/[\t\r\n]+/g, " ").trim();
+}
+
+/**
+ * Turns the event name into a clean .csv filename.
+ */
+function makeSafeFilename(eventName) {
+  const base = (eventName || "club-event-budget")
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "") || "event";
-  link.href = url;
-  link.download = `${eventSlug}-budget-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    .replace(/^-+|-+$/g, "");
+  return `${base || "club-event-budget"}.csv`;
+}
+
+/**
+ * Builds spreadsheet rows shared by CSV download and Copy for Excel.
+ */
+function buildSpreadsheetRows(state) {
+  const totals = calculateEventTotals(state.categories, state.totalPlannedBudget);
+  const eventTitle = sanitizeSpreadsheetText(state.eventName.trim() || "Untitled Event");
+  const rows = [
+    ["Event Name", eventTitle],
+    ["Total Planned Budget (USD)", totals.overallPlanned.toFixed(2)],
+    ["Total Actual Spending (USD)", totals.totalActual.toFixed(2)],
+    ["Remaining Balance (USD)", totals.overallRemaining.toFixed(2)],
+    ["Overall Status", totals.isOverallOverBudget ? "Over Budget" : "Within Budget"],
+    [],
+    [
+      "Category",
+      "Date",
+      "Notes / Vendor",
+      "Approval",
+      "Planned (USD)",
+      "Actual (USD)",
+      "Remaining (USD)",
+      "Budget Status"
+    ]
+  ];
+
+  for (const cat of state.categories) {
+    const { remaining, isOver } = calculateCategoryStatus(cat);
+    rows.push([
+      sanitizeSpreadsheetText(cat.name),
+      sanitizeSpreadsheetText(cat.date || ""),
+      sanitizeSpreadsheetText(cat.notes || ""),
+      normalizeApprovalStatus(cat.approvalStatus),
+      cat.planned.toFixed(2),
+      cat.actual.toFixed(2),
+      remaining.toFixed(2),
+      isOver ? "Over Budget" : "Within Budget"
+    ]);
+  }
+
+  rows.push([
+    "Category Totals",
+    "",
+    "",
+    "",
+    totals.categoriesPlanned.toFixed(2),
+    totals.totalActual.toFixed(2),
+    totals.tableRemaining.toFixed(2),
+    !totals.hasCategories
+      ? "No Expenses"
+      : totals.isTableOverBudget
+        ? "Over Budget"
+        : "Within Budget"
+  ]);
+
+  return rows;
+}
+
+/**
+ * Builds a complete CSV string (comma-separated values) for Excel.
+ */
+function buildCsvContent(state) {
+  const rows = buildSpreadsheetRows(state);
+  return rows.map((row) => row.map(escapeCsvValue).join(",")).join("\r\n");
+}
+
+/**
+ * Builds a tab-separated string that pastes straight into Excel or Google Sheets columns.
+ */
+function buildTsvContent(state) {
+  const rows = buildSpreadsheetRows(state);
+  return rows.map((row) => row.map(sanitizeTsvCell).join("\t")).join("\n");
+}
+
+/**
+ * Builds a plain-text budget recap ready to email or message to officers/advisors.
+ */
+function buildTextSummary(state) {
+  const totals = calculateEventTotals(state.categories, state.totalPlannedBudget);
+  const eventTitle = state.eventName.trim() || "Untitled Event";
+  const overallStatus = totals.isOverallOverBudget
+    ? `Over Budget by ${formatMoney(Math.abs(totals.overallRemaining))}`
+    : "Within Budget";
+
+  const lines = [
+    `Event Budget Summary: ${eventTitle}`,
+    `----------------------------------------`,
+    `Total Planned Budget: ${formatMoney(totals.overallPlanned)} USD`,
+    `Total Actual Spending: ${formatMoney(totals.totalActual)} USD`,
+    `Remaining Balance: ${formatMoney(totals.overallRemaining)} USD (${overallStatus})`,
+    ``
+  ];
+
+  if (state.categories.length === 0) {
+    lines.push("Expense Categories: None added yet.");
+    return lines.join("\n");
+  }
+
+  const overBudgetItems = state.categories.filter((cat) => calculateCategoryStatus(cat).isOver);
+  if (overBudgetItems.length > 0) {
+    lines.push("Over-Budget Categories:");
+    for (const cat of overBudgetItems) {
+      const { remaining } = calculateCategoryStatus(cat);
+      lines.push(`- ${cat.name}: over by ${formatMoney(Math.abs(remaining))} (Planned ${formatMoney(cat.planned)}, Actual ${formatMoney(cat.actual)})`);
+    }
+    lines.push("");
+  }
+
+  lines.push("Expense Breakdown:");
+  for (const cat of state.categories) {
+    const { remaining, isOver } = calculateCategoryStatus(cat);
+    const statusLabel = isOver ? "Over Budget" : "Within Budget";
+    const approval = normalizeApprovalStatus(cat.approvalStatus);
+    const details = [cat.date, cat.notes, approval].filter(Boolean).join(" | ");
+    const detailText = details ? ` [${details}]` : "";
+    lines.push(
+      `- ${cat.name}${detailText}: Planned ${formatMoney(cat.planned)}, Actual ${formatMoney(cat.actual)}, Remaining ${formatMoney(remaining)} (${statusLabel})`
+    );
+  }
+
+  return lines.join("\n");
 }
 
 
@@ -248,6 +377,10 @@ function exportBudgetCsv() {
 // Cached DOM elements
 const eventNameInput = document.getElementById("event-name-input");
 const resetDemoBtn = document.getElementById("reset-demo-btn");
+const exportCsvBtn = document.getElementById("export-csv-btn");
+const copyExcelBtn = document.getElementById("copy-excel-btn");
+const copySummaryBtn = document.getElementById("copy-summary-btn");
+const exportStatusMsg = document.getElementById("export-status-msg");
 const eventAlertBanner = document.getElementById("event-alert-banner");
 const eventOverAmount = document.getElementById("event-over-amount");
 const totalPlannedInput = document.getElementById("total-planned-input");
@@ -255,8 +388,13 @@ const budgetErrorMsg = document.getElementById("budget-error-msg");
 const totalActualEl = document.getElementById("total-actual");
 const totalRemainingEl = document.getElementById("total-remaining");
 const remainingCardEl = document.getElementById("remaining-card");
-const budgetAllocationNotice = document.getElementById("budget-allocation-notice");
-const exportCsvBtn = document.getElementById("export-csv-btn");
+const progressPercentEl = document.getElementById("budget-progress-percent");
+const progressDetailEl = document.getElementById("budget-progress-detail");
+const progressTrackEl = document.getElementById("budget-progress-track");
+const progressFillEl = document.getElementById("budget-progress-fill");
+const budgetMismatchBanner = document.getElementById("budget-mismatch-banner");
+const budgetMismatchText = document.getElementById("budget-mismatch-text");
+const syncBudgetBtn = document.getElementById("sync-budget-btn");
 
 const addCategoryForm = document.getElementById("add-category-form");
 const newCategoryNameInput = document.getElementById("new-category-name");
@@ -275,6 +413,8 @@ const tableTotalActualEl = document.getElementById("table-total-actual");
 const tableTotalRemainingEl = document.getElementById("table-total-remaining");
 const tableTotalStatusEl = document.getElementById("table-total-status");
 
+let exportStatusTimer = null;
+
 function showError(element, message) {
   element.textContent = message;
   element.classList.remove("hidden");
@@ -285,6 +425,72 @@ function clearError(element) {
   element.classList.add("hidden");
 }
 
+function showExportStatus(message, isError = false) {
+  exportStatusMsg.textContent = message;
+  exportStatusMsg.classList.toggle("is-error", isError);
+  exportStatusMsg.classList.remove("hidden");
+
+  if (exportStatusTimer) {
+    clearTimeout(exportStatusTimer);
+  }
+  exportStatusTimer = setTimeout(() => {
+    exportStatusMsg.classList.add("hidden");
+  }, 4000);
+}
+
+/**
+ * Copies text to the user's clipboard with a safe fallback for older browsers.
+ */
+async function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (error) {
+    // Fall through to temporary textarea fallback
+  }
+
+  try {
+    const tempArea = document.createElement("textarea");
+    tempArea.value = text;
+    tempArea.setAttribute("readonly", "");
+    tempArea.style.position = "fixed";
+    tempArea.style.opacity = "0";
+    document.body.appendChild(tempArea);
+    try {
+      tempArea.select();
+      return document.execCommand("copy");
+    } finally {
+      tempArea.remove();
+    }
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
+ * Triggers a browser download of a UTF-8 CSV file that opens cleanly in Excel.
+ */
+function downloadCsvFile(filename, csvText) {
+  try {
+    // Add UTF-8 BOM so Excel displays characters cleanly
+    const blob = new Blob(["\uFEFF" + csvText], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    // Let the browser begin the download before releasing its object URL.
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
 function applyApprovalStyle(selectEl, status) {
   selectEl.classList.remove("approval-planned", "approval-approved", "approval-paid");
   selectEl.classList.add(`approval-${status.toLowerCase()}`);
@@ -292,17 +498,6 @@ function applyApprovalStyle(selectEl, status) {
 
 function renderSummary() {
   const totals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
-
-  // Explain when the category-level plan does not match the event-level budget.
-  const allocationDifference = Math.round((totals.categoriesPlanned - totals.overallPlanned) * 100) / 100;
-  if (!totals.hasCategories || Math.abs(allocationDifference) < 0.01) {
-    budgetAllocationNotice.textContent = "";
-    budgetAllocationNotice.classList.add("hidden");
-  } else {
-    const relationship = allocationDifference > 0 ? "exceeds" : "is below";
-    budgetAllocationNotice.textContent = `Category planned amounts total ${formatMoney(totals.categoriesPlanned)}, which ${relationship} the event budget of ${formatMoney(totals.overallPlanned)} by ${formatMoney(Math.abs(allocationDifference))}.`;
-    budgetAllocationNotice.classList.remove("hidden");
-  }
 
   // Update top summary cards (compared against the editable Total Planned Budget)
   totalActualEl.textContent = formatMoney(totals.totalActual);
@@ -317,6 +512,23 @@ function renderSummary() {
   } else {
     remainingCardEl.classList.add("status-good");
     eventAlertBanner.classList.add("hidden");
+  }
+
+  // Update the visual budget usage progress bar
+  progressPercentEl.textContent = `${totals.usedPercent}%`;
+  progressDetailEl.textContent = `${formatMoney(totals.totalActual)} of ${formatMoney(totals.overallPlanned)} USD`;
+  progressTrackEl.setAttribute("aria-valuenow", String(Math.min(100, Math.max(0, Math.round(totals.usedPercent)))));
+  progressFillEl.style.width = `${totals.progressBarWidth}%`;
+  progressFillEl.classList.remove("tone-good", "tone-warning", "tone-danger");
+  progressFillEl.classList.add(`tone-${totals.progressTone}`);
+
+  // Show or hide the mismatch notice when overall budget != sum of category plans
+  if (totals.hasPlanMismatch) {
+    budgetMismatchText.textContent =
+      `Note: Total Planned Budget (${formatMoney(totals.overallPlanned)} USD) differs from the sum of category plans (${formatMoney(totals.categoriesPlanned)} USD).`;
+    budgetMismatchBanner.classList.remove("hidden");
+  } else {
+    budgetMismatchBanner.classList.add("hidden");
   }
 
   // Update the bottom Totals row inside the budget table (sum of all categories)
@@ -576,6 +788,16 @@ totalPlannedInput.addEventListener("input", () => {
   renderSummary();
 });
 
+syncBudgetBtn.addEventListener("click", () => {
+  const totals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
+  appState.totalPlannedBudget = totals.categoriesPlanned;
+  totalPlannedInput.value = totals.categoriesPlanned;
+  totalPlannedInput.classList.remove("input-invalid");
+  clearError(budgetErrorMsg);
+  saveState();
+  renderSummary();
+});
+
 addCategoryForm.addEventListener("submit", (event) => {
   event.preventDefault();
   clearError(formErrorMsg);
@@ -624,8 +846,6 @@ addCategoryForm.addEventListener("submit", (event) => {
   renderSummary();
 });
 
-exportCsvBtn.addEventListener("click", exportBudgetCsv);
-
 resetDemoBtn.addEventListener("click", () => {
   appState = cloneDefaultState();
   saveState();
@@ -633,6 +853,40 @@ resetDemoBtn.addEventListener("click", () => {
   clearError(formErrorMsg);
   clearError(tableErrorMsg);
   renderAll();
+});
+
+exportCsvBtn.addEventListener("click", () => {
+  const filename = makeSafeFilename(appState.eventName);
+  const csvText = buildCsvContent(appState);
+  const downloaded = downloadCsvFile(filename, csvText);
+
+  if (downloaded) {
+    showExportStatus(`Downloaded ${filename} — open it in Excel or Google Sheets.`);
+  } else {
+    showExportStatus("Could not download the CSV file in this browser.", true);
+  }
+});
+
+copyExcelBtn.addEventListener("click", async () => {
+  const tsvText = buildTsvContent(appState);
+  const copied = await copyTextToClipboard(tsvText);
+
+  if (copied) {
+    showExportStatus("Copied! Click a cell in Excel or Google Sheets and press Ctrl+V (or Cmd+V).");
+  } else {
+    showExportStatus("Could not copy automatically. Try Download CSV instead.", true);
+  }
+});
+
+copySummaryBtn.addEventListener("click", async () => {
+  const summaryText = buildTextSummary(appState);
+  const copied = await copyTextToClipboard(summaryText);
+
+  if (copied) {
+    showExportStatus("Budget summary copied! Ready to paste into an email or message.");
+  } else {
+    showExportStatus("Could not copy the summary in this browser.", true);
+  }
 });
 
 // Start the app

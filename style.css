@@ -46,6 +46,10 @@
   --approval-paid-text: #137333;
 
   --radius: 4px;
+  --warning-bg: #fef7e0;
+  --warning-border: #f6c343;
+  --warning-text: #9a5b00;
+  --warning-bar: #e38b06;
 }
 
 *,
@@ -660,4 +664,75 @@ input.input-invalid {
   .form-actions {
     grid-column: auto;
   }
+}
+
+/* Budget progress and category-plan mismatch */
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progress-card {
+  margin-top: 10px;
+  margin-bottom: 0;
+  padding: 10px 14px;
+}
+
+.progress-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 0.85rem;
+}
+
+.progress-title {
+  color: var(--text-main);
+}
+
+.progress-track {
+  width: 100%;
+  height: 10px;
+  background-color: #e5e7eb;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  transition: width 0.2s ease, background-color 0.2s ease;
+}
+
+.progress-fill.tone-good {
+  background-color: var(--primary);
+}
+
+.progress-fill.tone-warning {
+  background-color: var(--warning-bar);
+}
+
+.progress-fill.tone-danger {
+  background-color: var(--danger-text);
+}
+
+.mismatch-banner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background-color: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  border-left: 4px solid var(--warning-bar);
+  color: var(--warning-text);
+  font-size: 0.84rem;
 }
