@@ -185,6 +185,61 @@ function calculateEventTotals(categories, totalPlannedBudget) {
 }
 
 
+/**
+ * Exports the current event and its expense categories as a local CSV download.
+ * Text fields are protected against spreadsheet formula injection.
+ */
+function csvCell(value) {
+  let text = String(value ?? "");
+  if (/^\s*[=+\-@]/.test(text)) {
+    text = "'" + text;
+  }
+  return '"' + text.replace(/"/g, '""') + '"';
+}
+
+function exportBudgetCsv() {
+  const totals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
+  const rows = [
+    ["Event", csvCell(appState.eventName)],
+    ["Event Budget (USD)", totals.overallPlanned.toFixed(2)],
+    ["Total Actual (USD)", totals.totalActual.toFixed(2)],
+    ["Remaining Balance (USD)", totals.overallRemaining.toFixed(2)],
+    [],
+    ["Category", "Date", "Notes / Vendor", "Approval Status", "Planned (USD)", "Actual (USD)", "Remaining (USD)", "Budget Status"]
+  ];
+
+  for (const category of appState.categories) {
+    const { remaining, isOver } = calculateCategoryStatus(category);
+    rows.push([
+      csvCell(category.name),
+      csvCell(category.date),
+      csvCell(category.notes),
+      csvCell(normalizeApprovalStatus(category.approvalStatus)),
+      category.planned.toFixed(2),
+      category.actual.toFixed(2),
+      remaining.toFixed(2),
+      csvCell(isOver ? "Over Budget" : "Within Budget")
+    ]);
+  }
+
+  const csv = "\uFEFF" + rows.map((row) => row.join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const eventSlug = (appState.eventName || "event")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "event";
+  link.href = url;
+  link.download = `${eventSlug}-budget-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+
 /* ==========================================================================
    3. PRESENTATION LAYER (DISPLAY & EVENTS)
    Updates the DOM, displays errors, and connects user inputs.
@@ -200,6 +255,8 @@ const budgetErrorMsg = document.getElementById("budget-error-msg");
 const totalActualEl = document.getElementById("total-actual");
 const totalRemainingEl = document.getElementById("total-remaining");
 const remainingCardEl = document.getElementById("remaining-card");
+const budgetAllocationNotice = document.getElementById("budget-allocation-notice");
+const exportCsvBtn = document.getElementById("export-csv-btn");
 
 const addCategoryForm = document.getElementById("add-category-form");
 const newCategoryNameInput = document.getElementById("new-category-name");
@@ -235,6 +292,17 @@ function applyApprovalStyle(selectEl, status) {
 
 function renderSummary() {
   const totals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
+
+  // Explain when the category-level plan does not match the event-level budget.
+  const allocationDifference = Math.round((totals.categoriesPlanned - totals.overallPlanned) * 100) / 100;
+  if (!totals.hasCategories || Math.abs(allocationDifference) < 0.01) {
+    budgetAllocationNotice.textContent = "";
+    budgetAllocationNotice.classList.add("hidden");
+  } else {
+    const relationship = allocationDifference > 0 ? "exceeds" : "is below";
+    budgetAllocationNotice.textContent = `Category planned amounts total ${formatMoney(totals.categoriesPlanned)}, which ${relationship} the event budget of ${formatMoney(totals.overallPlanned)} by ${formatMoney(Math.abs(allocationDifference))}.`;
+    budgetAllocationNotice.classList.remove("hidden");
+  }
 
   // Update top summary cards (compared against the editable Total Planned Budget)
   totalActualEl.textContent = formatMoney(totals.totalActual);
@@ -555,6 +623,8 @@ addCategoryForm.addEventListener("submit", (event) => {
   renderCategories();
   renderSummary();
 });
+
+exportCsvBtn.addEventListener("click", exportBudgetCsv);
 
 resetDemoBtn.addEventListener("click", () => {
   appState = cloneDefaultState();
