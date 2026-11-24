@@ -45,8 +45,19 @@
 
       <div class="summary-grid">
         <article class="card summary-card">
-          <span class="summary-label">Total Planned</span>
-          <strong id="total-planned" class="summary-value">$0.00</strong>
+          <label for="total-planned-input" class="summary-label">Total Planned Budget</label>
+          <div class="budget-input-wrap">
+            <span class="currency-prefix" aria-hidden="true">$</span>
+            <input
+              type="number"
+              id="total-planned-input"
+              class="summary-input"
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+              aria-label="Total planned event budget in dollars"
+            />
+          </div>
         </article>
 
         <article class="card summary-card">
@@ -59,6 +70,8 @@
           <strong id="total-remaining" class="summary-value">$0.00</strong>
         </article>
       </div>
+
+      <p id="budget-error-msg" class="error-message hidden" role="alert"></p>
     </section>
 
     <!-- Add New Expense Category Form -->
@@ -74,6 +87,33 @@
             autocomplete="off"
             required
           />
+        </div>
+
+        <div class="field-group">
+          <label for="new-expense-date">Date</label>
+          <input
+            type="date"
+            id="new-expense-date"
+          />
+        </div>
+
+        <div class="field-group">
+          <label for="new-expense-notes">Notes / Vendor</label>
+          <input
+            type="text"
+            id="new-expense-notes"
+            placeholder="e.g., Campus Catering"
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="field-group">
+          <label for="new-approval-status">Approval Status</label>
+          <select id="new-approval-status">
+            <option value="Planned">Planned</option>
+            <option value="Approved">Approved</option>
+            <option value="Paid">Paid</option>
+          </select>
         </div>
 
         <div class="field-group">
@@ -100,7 +140,9 @@
           />
         </div>
 
-        <button type="submit" class="btn btn-primary">Add Category</button>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Add Category</button>
+        </div>
       </form>
       <p id="form-error-msg" class="error-message hidden" role="alert"></p>
     </section>
@@ -119,10 +161,13 @@
           <thead>
             <tr>
               <th scope="col">Category</th>
+              <th scope="col">Date</th>
+              <th scope="col">Notes / Vendor</th>
+              <th scope="col">Approval</th>
               <th scope="col" class="num-col">Planned ($)</th>
               <th scope="col" class="num-col">Actual ($)</th>
               <th scope="col" class="num-col">Remaining ($)</th>
-              <th scope="col">Status</th>
+              <th scope="col">Budget Status</th>
               <th scope="col" class="action-col">Action</th>
             </tr>
           </thead>
@@ -131,7 +176,7 @@
           </tbody>
           <tfoot>
             <tr class="totals-row">
-              <th scope="row">Total</th>
+              <th scope="row" colspan="4">Total</th>
               <td id="table-total-planned" class="num-col">$0.00</td>
               <td id="table-total-actual" class="num-col">$0.00</td>
               <td id="table-total-remaining" class="num-col">$0.00</td>
