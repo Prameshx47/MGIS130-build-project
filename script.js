@@ -4,13 +4,39 @@
    ========================================================================== */
 
 const STORAGE_KEY = "club_event_budget_tracker_v1";
+const APPROVAL_OPTIONS = ["Planned", "Approved", "Paid"];
 
 const DEFAULT_STATE = {
   eventName: "Welcome Week Club Social",
+  totalPlannedBudget: 1000,
   categories: [
-    { id: 1, name: "Venue", planned: 400, actual: 375 },
-    { id: 2, name: "Food", planned: 400, actual: 425 },
-    { id: 3, name: "Supplies", planned: 200, actual: 125 }
+    {
+      id: 1,
+      name: "Venue",
+      date: "2026-09-10",
+      notes: "Student Union Ballroom",
+      approvalStatus: "Paid",
+      planned: 400,
+      actual: 375
+    },
+    {
+      id: 2,
+      name: "Food",
+      date: "2026-09-12",
+      notes: "Campus Catering",
+      approvalStatus: "Approved",
+      planned: 400,
+      actual: 425
+    },
+    {
+      id: 3,
+      name: "Supplies",
+      date: "2026-09-14",
+      notes: "Print Shop & Flyers",
+      approvalStatus: "Planned",
+      planned: 200,
+      actual: 125
+    }
   ]
 };
 
@@ -23,6 +49,28 @@ function loadState() {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && typeof parsed.eventName === "string" && Array.isArray(parsed.categories)) {
+        // Fill in totalPlannedBudget if older saved data does not have it yet
+        const hasValidBudget =
+          typeof parsed.totalPlannedBudget === "number" &&
+          Number.isFinite(parsed.totalPlannedBudget) &&
+          parsed.totalPlannedBudget >= 0;
+
+        if (!hasValidBudget) {
+          const categorySum = parsed.categories.reduce(
+            (sum, item) => sum + (Number(item.planned) || 0),
+            0
+          );
+          parsed.totalPlannedBudget = Math.round(categorySum * 100) / 100;
+        }
+
+        // Fill in new detail fields (date, notes, approvalStatus) for older saved rows
+        parsed.categories = parsed.categories.map((item) => ({
+          ...item,
+          date: typeof item.date === "string" ? item.date : "",
+          notes: typeof item.notes === "string" ? item.notes : "",
+          approvalStatus: normalizeApprovalStatus(item.approvalStatus)
+        }));
+
         return parsed;
       }
     }
@@ -43,6 +91,7 @@ function saveState() {
 function cloneDefaultState() {
   return {
     eventName: DEFAULT_STATE.eventName,
+    totalPlannedBudget: DEFAULT_STATE.totalPlannedBudget,
     categories: DEFAULT_STATE.categories.map((item) => ({ ...item }))
   };
 }
@@ -60,6 +109,13 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
 
 function formatMoney(amount) {
   return currencyFormatter.format(amount);
+}
+
+/**
+ * Ensures approval status is one of the allowed options.
+ */
+function normalizeApprovalStatus(value) {
+  return APPROVAL_OPTIONS.includes(value) ? value : "Planned";
 }
 
 /**
@@ -92,30 +148,39 @@ function calculateCategoryStatus(category) {
 }
 
 /**
- * Calculates totals across all expense categories.
- * Over budget is strictly true ONLY when categories exist AND totalActual > totalPlanned.
+ * Calculates both:
+ * 1) Overall event totals (comparing total actual spending against the editable Total Planned Budget)
+ * 2) Table totals (summing the individual category rows)
  */
-function calculateEventTotals(categories) {
-  let totalPlanned = 0;
+function calculateEventTotals(categories, totalPlannedBudget) {
+  let categoriesPlanned = 0;
   let totalActual = 0;
 
   for (const cat of categories) {
-    totalPlanned += cat.planned;
+    categoriesPlanned += cat.planned;
     totalActual += cat.actual;
   }
 
-  totalPlanned = Math.round(totalPlanned * 100) / 100;
+  categoriesPlanned = Math.round(categoriesPlanned * 100) / 100;
   totalActual = Math.round(totalActual * 100) / 100;
-  const totalRemaining = Math.round((totalPlanned - totalActual) * 100) / 100;
+
+  const overallPlanned = Math.round(totalPlannedBudget * 100) / 100;
+  const overallRemaining = Math.round((overallPlanned - totalActual) * 100) / 100;
+  const isOverallOverBudget = totalActual > overallPlanned;
+
+  const tableRemaining = Math.round((categoriesPlanned - totalActual) * 100) / 100;
   const hasCategories = categories.length > 0;
-  const isOverBudget = hasCategories && totalActual > totalPlanned;
+  const isTableOverBudget = hasCategories && totalActual > categoriesPlanned;
 
   return {
-    totalPlanned,
+    overallPlanned,
+    overallRemaining,
+    isOverallOverBudget,
+    categoriesPlanned,
     totalActual,
-    totalRemaining,
+    tableRemaining,
     hasCategories,
-    isOverBudget
+    isTableOverBudget
   };
 }
 
@@ -130,13 +195,17 @@ const eventNameInput = document.getElementById("event-name-input");
 const resetDemoBtn = document.getElementById("reset-demo-btn");
 const eventAlertBanner = document.getElementById("event-alert-banner");
 const eventOverAmount = document.getElementById("event-over-amount");
-const totalPlannedEl = document.getElementById("total-planned");
+const totalPlannedInput = document.getElementById("total-planned-input");
+const budgetErrorMsg = document.getElementById("budget-error-msg");
 const totalActualEl = document.getElementById("total-actual");
 const totalRemainingEl = document.getElementById("total-remaining");
 const remainingCardEl = document.getElementById("remaining-card");
 
 const addCategoryForm = document.getElementById("add-category-form");
 const newCategoryNameInput = document.getElementById("new-category-name");
+const newExpenseDateInput = document.getElementById("new-expense-date");
+const newExpenseNotesInput = document.getElementById("new-expense-notes");
+const newApprovalStatusSelect = document.getElementById("new-approval-status");
 const newPlannedInput = document.getElementById("new-planned-amount");
 const newActualInput = document.getElementById("new-actual-amount");
 const formErrorMsg = document.getElementById("form-error-msg");
@@ -159,41 +228,43 @@ function clearError(element) {
   element.classList.add("hidden");
 }
 
+function applyApprovalStyle(selectEl, status) {
+  selectEl.classList.remove("approval-planned", "approval-approved", "approval-paid");
+  selectEl.classList.add(`approval-${status.toLowerCase()}`);
+}
+
 function renderSummary() {
-  const totals = calculateEventTotals(appState.categories);
+  const totals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
 
-  totalPlannedEl.textContent = formatMoney(totals.totalPlanned);
+  // Update top summary cards (compared against the editable Total Planned Budget)
   totalActualEl.textContent = formatMoney(totals.totalActual);
-  totalRemainingEl.textContent = formatMoney(totals.totalRemaining);
+  totalRemainingEl.textContent = formatMoney(totals.overallRemaining);
 
-  // Update the bottom Totals row inside the budget table
-  tableTotalPlannedEl.textContent = formatMoney(totals.totalPlanned);
+  remainingCardEl.classList.remove("status-good", "status-over");
+
+  if (totals.isOverallOverBudget) {
+    remainingCardEl.classList.add("status-over");
+    eventOverAmount.textContent = formatMoney(Math.abs(totals.overallRemaining));
+    eventAlertBanner.classList.remove("hidden");
+  } else {
+    remainingCardEl.classList.add("status-good");
+    eventAlertBanner.classList.add("hidden");
+  }
+
+  // Update the bottom Totals row inside the budget table (sum of all categories)
+  tableTotalPlannedEl.textContent = formatMoney(totals.categoriesPlanned);
   tableTotalActualEl.textContent = formatMoney(totals.totalActual);
-  tableTotalRemainingEl.textContent = formatMoney(totals.totalRemaining);
+  tableTotalRemainingEl.textContent = formatMoney(totals.tableRemaining);
 
   if (!totals.hasCategories) {
     tableTotalRemainingEl.className = "num-col remaining-amount neutral";
     tableTotalStatusEl.innerHTML = '<span class="status-badge neutral">No Expenses</span>';
-  } else if (totals.isOverBudget) {
+  } else if (totals.isTableOverBudget) {
     tableTotalRemainingEl.className = "num-col remaining-amount negative";
     tableTotalStatusEl.innerHTML = '<span class="status-badge over">Over Budget</span>';
   } else {
     tableTotalRemainingEl.className = "num-col remaining-amount positive";
     tableTotalStatusEl.innerHTML = '<span class="status-badge ok">Within Budget</span>';
-  }
-
-  // Update top summary card and alert banner
-  remainingCardEl.classList.remove("status-good", "status-over");
-
-  if (!totals.hasCategories) {
-    eventAlertBanner.classList.add("hidden");
-  } else if (totals.isOverBudget) {
-    remainingCardEl.classList.add("status-over");
-    eventOverAmount.textContent = formatMoney(Math.abs(totals.totalRemaining));
-    eventAlertBanner.classList.remove("hidden");
-  } else {
-    remainingCardEl.classList.add("status-good");
-    eventAlertBanner.classList.add("hidden");
   }
 }
 
@@ -206,7 +277,7 @@ function renderCategories() {
   if (count === 0) {
     const emptyRow = document.createElement("tr");
     const emptyCell = document.createElement("td");
-    emptyCell.colSpan = 6;
+    emptyCell.colSpan = 9;
     emptyCell.className = "empty-cell";
     emptyCell.innerHTML =
       '<span class="empty-state-title">No expense categories yet</span>' +
@@ -231,7 +302,58 @@ function renderCategories() {
     nameCell.textContent = category.name;
     row.appendChild(nameCell);
 
-    // 2. Planned Input cell
+    // 2. Date cell
+    const dateCell = document.createElement("td");
+    const dateInput = document.createElement("input");
+    dateInput.type = "date";
+    dateInput.value = category.date || "";
+    dateInput.setAttribute("aria-label", `${category.name} expense date`);
+    dateInput.addEventListener("change", () => {
+      handleCategoryDetailChange(category.id, "date", dateInput.value);
+    });
+    dateCell.appendChild(dateInput);
+    row.appendChild(dateCell);
+
+    // 3. Notes / Vendor cell
+    const notesCell = document.createElement("td");
+    const notesInput = document.createElement("input");
+    notesInput.type = "text";
+    notesInput.value = category.notes || "";
+    notesInput.placeholder = "Vendor or note";
+    notesInput.setAttribute("aria-label", `${category.name} notes or vendor`);
+    notesInput.addEventListener("input", () => {
+      handleCategoryDetailChange(category.id, "notes", notesInput.value);
+    });
+    notesCell.appendChild(notesInput);
+    row.appendChild(notesCell);
+
+    // 4. Approval Status cell
+    const approvalCell = document.createElement("td");
+    const approvalSelect = document.createElement("select");
+    approvalSelect.className = "approval-select";
+    approvalSelect.setAttribute("aria-label", `${category.name} approval status`);
+
+    for (const optionText of APPROVAL_OPTIONS) {
+      const option = document.createElement("option");
+      option.value = optionText;
+      option.textContent = optionText;
+      approvalSelect.appendChild(option);
+    }
+
+    const currentApproval = normalizeApprovalStatus(category.approvalStatus);
+    approvalSelect.value = currentApproval;
+    applyApprovalStyle(approvalSelect, currentApproval);
+
+    approvalSelect.addEventListener("change", () => {
+      const nextStatus = normalizeApprovalStatus(approvalSelect.value);
+      applyApprovalStyle(approvalSelect, nextStatus);
+      handleCategoryDetailChange(category.id, "approvalStatus", nextStatus);
+    });
+
+    approvalCell.appendChild(approvalSelect);
+    row.appendChild(approvalCell);
+
+    // 5. Planned Input cell
     const plannedCell = document.createElement("td");
     plannedCell.className = "num-col";
     const plannedInput = document.createElement("input");
@@ -246,7 +368,7 @@ function renderCategories() {
     plannedCell.appendChild(plannedInput);
     row.appendChild(plannedCell);
 
-    // 3. Actual Input cell
+    // 6. Actual Input cell
     const actualCell = document.createElement("td");
     actualCell.className = "num-col";
     const actualInput = document.createElement("input");
@@ -261,14 +383,14 @@ function renderCategories() {
     actualCell.appendChild(actualInput);
     row.appendChild(actualCell);
 
-    // 4. Remaining cell
+    // 7. Remaining cell
     const remainingCell = document.createElement("td");
     remainingCell.id = `remaining-${category.id}`;
     remainingCell.className = `num-col remaining-amount ${isOver ? "negative" : "positive"}`;
     remainingCell.textContent = formatMoney(remaining);
     row.appendChild(remainingCell);
 
-    // 5. Status badge cell
+    // 8. Budget Status badge cell
     const statusCell = document.createElement("td");
     const statusBadge = document.createElement("span");
     statusBadge.id = `status-${category.id}`;
@@ -277,7 +399,7 @@ function renderCategories() {
     statusCell.appendChild(statusBadge);
     row.appendChild(statusCell);
 
-    // 6. Action (Remove) cell
+    // 9. Action (Remove) cell
     const actionCell = document.createElement("td");
     actionCell.className = "action-col";
     const removeBtn = document.createElement("button");
@@ -293,6 +415,14 @@ function renderCategories() {
 
     categoriesTbody.appendChild(row);
   }
+}
+
+function handleCategoryDetailChange(categoryId, field, value) {
+  const category = appState.categories.find((item) => item.id === categoryId);
+  if (!category) return;
+
+  category[field] = value;
+  saveState();
 }
 
 function handleCategoryAmountChange(categoryId, field, inputEl) {
@@ -345,6 +475,9 @@ function removeCategory(categoryId) {
 
 function renderAll() {
   eventNameInput.value = appState.eventName;
+  totalPlannedInput.value = appState.totalPlannedBudget;
+  totalPlannedInput.classList.remove("input-invalid");
+  clearError(budgetErrorMsg);
   renderCategories();
   renderSummary();
 }
@@ -357,6 +490,22 @@ function renderAll() {
 eventNameInput.addEventListener("input", () => {
   appState.eventName = eventNameInput.value;
   saveState();
+});
+
+totalPlannedInput.addEventListener("input", () => {
+  const result = validateMoney(totalPlannedInput.value, "Total Planned Budget");
+
+  if (!result.valid) {
+    totalPlannedInput.classList.add("input-invalid");
+    showError(budgetErrorMsg, result.message);
+    return;
+  }
+
+  totalPlannedInput.classList.remove("input-invalid");
+  clearError(budgetErrorMsg);
+  appState.totalPlannedBudget = result.value;
+  saveState();
+  renderSummary();
 });
 
 addCategoryForm.addEventListener("submit", (event) => {
@@ -392,6 +541,9 @@ addCategoryForm.addEventListener("submit", (event) => {
   appState.categories.push({
     id: nextId,
     name,
+    date: newExpenseDateInput.value,
+    notes: newExpenseNotesInput.value.trim(),
+    approvalStatus: normalizeApprovalStatus(newApprovalStatusSelect.value),
     planned: plannedCheck.value,
     actual: actualCheck.value
   });
@@ -407,6 +559,7 @@ addCategoryForm.addEventListener("submit", (event) => {
 resetDemoBtn.addEventListener("click", () => {
   appState = cloneDefaultState();
   saveState();
+  clearError(budgetErrorMsg);
   clearError(formErrorMsg);
   clearError(tableErrorMsg);
   renderAll();
