@@ -325,6 +325,13 @@ input.input-invalid {
   gap: 10px;
 }
 
+.net-summary-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .summary-card {
   margin-bottom: 0;
   padding: 12px 14px;
@@ -346,6 +353,11 @@ input.input-invalid {
   font-weight: 700;
   color: var(--text-main);
   font-variant-numeric: tabular-nums;
+}
+
+.summary-sub {
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 
 .budget-input-wrap {
@@ -613,7 +625,7 @@ input.input-invalid {
 }
 
 .budget-table tbody input[type="text"] {
-  min-width: 155px;
+  min-width: 145px;
 }
 
 .budget-table tbody input.category-name-input {
@@ -630,7 +642,17 @@ input.input-invalid {
   background-color: #ffffff;
 }
 
-/* Approval Status Dropdown */
+.table-type-select {
+  min-height: 30px;
+  min-width: 130px;
+  padding: 3px 6px;
+  font-size: 0.82rem;
+  border-radius: 3px;
+  background-color: #ffffff;
+  cursor: pointer;
+}
+
+/* Approval & Income Status Dropdowns */
 .approval-select {
   min-height: 30px;
   min-width: 106px;
@@ -639,6 +661,13 @@ input.input-invalid {
   font-weight: 600;
   border-radius: 3px;
   cursor: pointer;
+}
+
+.approval-select.approval-planned,
+.approval-select.income-expected {
+  background-color: var(--approval-approved-bg);
+  border-color: var(--approval-approved-border);
+  color: var(--approval-approved-text);
 }
 
 .approval-select.approval-planned {
@@ -653,7 +682,8 @@ input.input-invalid {
   color: var(--approval-approved-text);
 }
 
-.approval-select.approval-paid {
+.approval-select.approval-paid,
+.approval-select.income-received {
   background-color: var(--approval-paid-bg);
   border-color: var(--approval-paid-border);
   color: var(--approval-paid-text);
@@ -728,7 +758,20 @@ input.input-invalid {
   margin-bottom: 4px;
 }
 
-/* Add Category Form */
+/* Add Category & Inline Add Funding Forms */
+.inline-form-block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.inline-form-title {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
 .add-form {
   display: grid;
   grid-template-columns: 1fr;
@@ -1202,6 +1245,7 @@ input.input-invalid {
 
 /* Tablet and Desktop Layout */
 @media (min-width: 600px) {
+  .net-summary-grid,
   .forecast-inputs,
   .forecast-metrics {
     grid-template-columns: repeat(2, 1fr);
@@ -1251,6 +1295,11 @@ input.input-invalid {
 @media (min-width: 1024px) {
   .add-form {
     grid-template-columns: 1.4fr 1fr 1.5fr 0.9fr 0.9fr 0.9fr auto;
+    align-items: end;
+  }
+
+  .add-income-form {
+    grid-template-columns: 1.3fr 1.1fr 0.95fr 1.2fr 0.85fr 0.85fr 0.85fr auto;
     align-items: end;
   }
 

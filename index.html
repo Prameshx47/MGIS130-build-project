@@ -11,7 +11,7 @@
     <div class="container header-inner">
       <div>
         <h1>Club Event Budget Tracker</h1>
-        <p class="subtitle">Compare planned event expenses against actual spending and forecast your year-end club budget.</p>
+        <p class="subtitle">Compare planned event expenses against actual spending, track funding, and forecast your year-end club budget.</p>
       </div>
     </div>
   </header>
@@ -70,7 +70,7 @@
       </p>
     </section>
 
-    <!-- Budget Overview & Over-Budget Alert -->
+    <!-- Budget Overview, Funding Position & Over-Budget Alert -->
     <section class="summary-section" aria-label="Budget Summary">
       <div id="event-alert-banner" class="alert-banner hidden" role="alert">
         <strong>Over Budget Alert:</strong> Total actual spending exceeds the planned event budget by
@@ -95,13 +95,28 @@
         </article>
 
         <article class="card summary-card">
-          <span class="summary-label">Total Actual (USD)</span>
+          <span class="summary-label">Total Actual Expenses (USD)</span>
           <strong id="total-actual" class="summary-value">$0.00</strong>
         </article>
 
         <article id="remaining-card" class="card summary-card">
-          <span class="summary-label">Remaining Balance (USD)</span>
+          <span class="summary-label">Budget Remaining (USD)</span>
           <strong id="total-remaining" class="summary-value">$0.00</strong>
+        </article>
+      </div>
+
+      <!-- Funding & Net Profit/Loss Strip -->
+      <div class="net-summary-grid">
+        <article class="card summary-card">
+          <span class="summary-label">Total Actual Income / Funding (USD)</span>
+          <strong id="total-income-actual" class="summary-value">$0.00</strong>
+          <span id="total-income-planned-sub" class="summary-sub">Planned funding: $0.00 USD</span>
+        </article>
+
+        <article id="net-profit-card" class="card summary-card">
+          <span class="summary-label">Net Profit / Loss (USD)</span>
+          <strong id="net-profit-value" class="summary-value">$0.00</strong>
+          <span id="net-profit-sub" class="summary-sub">Actual funding minus actual expenses</span>
         </article>
       </div>
 
@@ -294,6 +309,129 @@
         </div>
       </form>
       <p id="form-error-msg" class="error-message hidden" role="alert"></p>
+    </section>
+
+    <!-- Income & Funding Tracker -->
+    <section class="card table-card" aria-labelledby="income-heading">
+      <div class="section-header">
+        <div class="section-title-group">
+          <h2 id="income-heading">Income &amp; Funding</h2>
+          <span id="income-count" class="muted-text">0 sources</span>
+        </div>
+        <span class="muted-text">Track club allocations, ticket sales, and sponsorships</span>
+      </div>
+
+      <p id="income-error-msg" class="error-message hidden" role="alert"></p>
+
+      <div class="table-wrapper">
+        <table class="budget-table" aria-describedby="income-heading">
+          <thead>
+            <tr>
+              <th scope="col">Funding Source</th>
+              <th scope="col">Type</th>
+              <th scope="col">Date</th>
+              <th scope="col">Notes</th>
+              <th scope="col">Status</th>
+              <th scope="col" class="num-col">Planned (USD)</th>
+              <th scope="col" class="num-col">Actual (USD)</th>
+              <th scope="col" class="num-col">Difference (USD)</th>
+              <th scope="col" class="action-col">Action</th>
+            </tr>
+          </thead>
+          <tbody id="incomes-tbody">
+            <!-- Income rows are rendered here by script.js -->
+          </tbody>
+          <tfoot>
+            <tr class="totals-row">
+              <th scope="row" colspan="5">Total Funding</th>
+              <td id="income-total-planned" class="num-col">$0.00</td>
+              <td id="income-total-actual" class="num-col">$0.00</td>
+              <td id="income-total-diff" class="num-col">$0.00</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <!-- Inline Add Funding Source Form -->
+      <div class="inline-form-block">
+        <h3 class="inline-form-title">Add Funding Source</h3>
+        <form id="add-income-form" class="add-form add-income-form" novalidate>
+          <div class="field-group">
+            <label for="new-income-source">Source Name</label>
+            <input
+              type="text"
+              id="new-income-source"
+              placeholder="e.g., Ticket Sales"
+              autocomplete="off"
+              required
+            />
+          </div>
+
+          <div class="field-group">
+            <label for="new-income-type">Type</label>
+            <select id="new-income-type">
+              <option value="Club Allocation">Club Allocation</option>
+              <option value="Ticket Sales">Ticket Sales</option>
+              <option value="Sponsorship">Sponsorship</option>
+              <option value="Fundraiser">Fundraiser</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label for="new-income-date">Date</label>
+            <input type="date" id="new-income-date" />
+          </div>
+
+          <div class="field-group">
+            <label for="new-income-notes">Notes</label>
+            <input
+              type="text"
+              id="new-income-notes"
+              placeholder="e.g., 50 tickets @ $5"
+              autocomplete="off"
+            />
+          </div>
+
+          <div class="field-group">
+            <label for="new-income-status">Status</label>
+            <select id="new-income-status">
+              <option value="Expected">Expected</option>
+              <option value="Received">Received</option>
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label for="new-income-planned">Planned (USD)</label>
+            <input
+              type="number"
+              id="new-income-planned"
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+              required
+            />
+          </div>
+
+          <div class="field-group">
+            <label for="new-income-actual">Actual (USD)</label>
+            <input
+              type="number"
+              id="new-income-actual"
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+              required
+            />
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Add Funding</button>
+          </div>
+        </form>
+        <p id="income-form-error-msg" class="error-message hidden" role="alert"></p>
+      </div>
     </section>
 
     <!-- Visual Charts & End-of-Year Forecast Dashboard -->

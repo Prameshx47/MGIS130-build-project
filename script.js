@@ -5,6 +5,14 @@
 
 const STORAGE_KEY = "club_event_budget_tracker_v1";
 const APPROVAL_OPTIONS = ["Planned", "Approved", "Paid"];
+const INCOME_TYPE_OPTIONS = [
+  "Club Allocation",
+  "Ticket Sales",
+  "Sponsorship",
+  "Fundraiser",
+  "Other"
+];
+const INCOME_STATUS_OPTIONS = ["Expected", "Received"];
 
 const DEFAULT_FORECAST = {
   annualBudget: 6000,
@@ -48,6 +56,38 @@ const DEFAULT_STATE = {
           planned: 200,
           actual: 125
         }
+      ],
+      incomes: [
+        {
+          id: 1,
+          source: "Student Gov Allocation",
+          type: "Club Allocation",
+          date: "2026-09-01",
+          notes: "Fall Semester Grant",
+          status: "Received",
+          planned: 700,
+          actual: 700
+        },
+        {
+          id: 2,
+          source: "Event Ticket Sales",
+          type: "Ticket Sales",
+          date: "2026-09-12",
+          notes: "56 tickets @ $5",
+          status: "Received",
+          planned: 250,
+          actual: 280
+        },
+        {
+          id: 3,
+          source: "Campus Roasters Sponsor",
+          type: "Sponsorship",
+          date: "2026-09-08",
+          notes: "Coffee table co-sponsor",
+          status: "Expected",
+          planned: 150,
+          actual: 100
+        }
       ]
     },
     {
@@ -81,6 +121,38 @@ const DEFAULT_STATE = {
           approvalStatus: "Planned",
           planned: 250,
           actual: 180
+        }
+      ],
+      incomes: [
+        {
+          id: 1,
+          source: "Club Treasury Allocation",
+          type: "Club Allocation",
+          date: "2027-02-01",
+          notes: "Spring Operating Fund",
+          status: "Received",
+          planned: 800,
+          actual: 800
+        },
+        {
+          id: 2,
+          source: "Regional Tech Partners",
+          type: "Sponsorship",
+          date: "2027-02-10",
+          notes: "Employer table sponsorship",
+          status: "Received",
+          planned: 500,
+          actual: 500
+        },
+        {
+          id: 3,
+          source: "Student RSVP Tickets",
+          type: "Ticket Sales",
+          date: "2027-02-18",
+          notes: "30 tickets @ $5",
+          status: "Expected",
+          planned: 200,
+          actual: 150
         }
       ]
     }
@@ -128,6 +200,36 @@ function sanitizeCategory(raw, fallbackId) {
   };
 }
 
+function sanitizeIncome(raw, fallbackId) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const id =
+    typeof source.id === "number" && Number.isFinite(source.id)
+      ? source.id
+      : fallbackId;
+  const plannedNum = Number(source.planned);
+  const actualNum = Number(source.actual);
+
+  return {
+    id,
+    source:
+      typeof source.source === "string" && source.source.trim()
+        ? source.source
+        : "Untitled Funding",
+    type: normalizeIncomeType(source.type),
+    date: typeof source.date === "string" ? source.date : "",
+    notes: typeof source.notes === "string" ? source.notes : "",
+    status: normalizeIncomeStatus(source.status),
+    planned:
+      Number.isFinite(plannedNum) && plannedNum >= 0
+        ? Math.round(plannedNum * 100) / 100
+        : 0,
+    actual:
+      Number.isFinite(actualNum) && actualNum >= 0
+        ? Math.round(actualNum * 100) / 100
+        : 0
+  };
+}
+
 function sanitizeEvent(raw, fallbackIndex) {
   const source = raw && typeof raw === "object" ? raw : {};
   const id =
@@ -138,6 +240,9 @@ function sanitizeEvent(raw, fallbackIndex) {
     typeof source.eventName === "string" ? source.eventName : `Club Event ${fallbackIndex + 1}`;
   const categories = Array.isArray(source.categories)
     ? source.categories.map((item, idx) => sanitizeCategory(item, idx + 1))
+    : [];
+  const incomes = Array.isArray(source.incomes)
+    ? source.incomes.map((item, idx) => sanitizeIncome(item, idx + 1))
     : [];
 
   const hasValidBudget =
@@ -155,7 +260,8 @@ function sanitizeEvent(raw, fallbackIndex) {
     id,
     eventName,
     totalPlannedBudget,
-    categories
+    categories,
+    incomes
   };
 }
 
@@ -249,7 +355,8 @@ function cloneDefaultState() {
       id: evt.id,
       eventName: evt.eventName,
       totalPlannedBudget: evt.totalPlannedBudget,
-      categories: evt.categories.map((item) => ({ ...item }))
+      categories: evt.categories.map((item) => ({ ...item })),
+      incomes: evt.incomes.map((item) => ({ ...item }))
     })),
     yearForecast: { ...DEFAULT_FORECAST }
   };
@@ -279,11 +386,24 @@ function formatMoney(amount) {
   return currencyFormatter.format(amount);
 }
 
+function formatSignedMoney(amount) {
+  if (amount > 0) return `+${formatMoney(amount)}`;
+  return formatMoney(amount);
+}
+
 /**
  * Ensures approval status is one of the allowed options.
  */
 function normalizeApprovalStatus(value) {
   return APPROVAL_OPTIONS.includes(value) ? value : "Planned";
+}
+
+function normalizeIncomeType(value) {
+  return INCOME_TYPE_OPTIONS.includes(value) ? value : "Other";
+}
+
+function normalizeIncomeStatus(value) {
+  return INCOME_STATUS_OPTIONS.includes(value) ? value : "Expected";
 }
 
 /**
@@ -329,6 +449,54 @@ function calculateCategoryStatus(category) {
   const remaining = Math.round((category.planned - category.actual) * 100) / 100;
   const isOver = category.actual > category.planned;
   return { remaining, isOver };
+}
+
+/**
+ * Calculates difference for one income row (Actual - Planned).
+ */
+function calculateIncomeDifference(income) {
+  return Math.round((income.actual - income.planned) * 100) / 100;
+}
+
+/**
+ * Sums planned and actual funding across all income rows for an event.
+ */
+function calculateIncomeTotals(incomes) {
+  let totalPlanned = 0;
+  let totalActual = 0;
+  let receivedActual = 0;
+
+  for (const item of incomes) {
+    totalPlanned += item.planned;
+    totalActual += item.actual;
+    if (normalizeIncomeStatus(item.status) === "Received") {
+      receivedActual += item.actual;
+    }
+  }
+
+  totalPlanned = Math.round(totalPlanned * 100) / 100;
+  totalActual = Math.round(totalActual * 100) / 100;
+  receivedActual = Math.round(receivedActual * 100) / 100;
+  const difference = Math.round((totalActual - totalPlanned) * 100) / 100;
+
+  return {
+    totalPlanned,
+    totalActual,
+    receivedActual,
+    difference,
+    hasIncomes: incomes.length > 0
+  };
+}
+
+/**
+ * Calculates Net Profit / Loss (Actual Income - Actual Expenses).
+ */
+function calculateNetSummary(totalActualIncome, totalActualExpenses) {
+  const netBalance = Math.round((totalActualIncome - totalActualExpenses) * 100) / 100;
+  return {
+    netBalance,
+    isDeficit: netBalance < 0
+  };
 }
 
 /**
@@ -597,13 +765,19 @@ function makeSafeFilename(eventName) {
  */
 function buildSpreadsheetRows(eventData) {
   const totals = calculateEventTotals(eventData.categories, eventData.totalPlannedBudget);
+  const incomeTotals = calculateIncomeTotals(eventData.incomes);
+  const net = calculateNetSummary(incomeTotals.totalActual, totals.totalActual);
   const eventTitle = sanitizeSpreadsheetText(eventData.eventName.trim() || "Untitled Event");
+
   const rows = [
     ["Event Name", eventTitle],
     ["Total Planned Budget (USD)", totals.overallPlanned.toFixed(2)],
-    ["Total Actual Spending (USD)", totals.totalActual.toFixed(2)],
-    ["Remaining Balance (USD)", totals.overallRemaining.toFixed(2)],
-    ["Overall Status", totals.isOverallOverBudget ? "Over Budget" : "Within Budget"],
+    ["Total Actual Expenses (USD)", totals.totalActual.toFixed(2)],
+    ["Budget Remaining (USD)", totals.overallRemaining.toFixed(2)],
+    ["Overall Budget Status", totals.isOverallOverBudget ? "Over Budget" : "Within Budget"],
+    ["Total Planned Funding (USD)", incomeTotals.totalPlanned.toFixed(2)],
+    ["Total Actual Funding (USD)", incomeTotals.totalActual.toFixed(2)],
+    ["Net Profit / Loss (USD)", net.netBalance.toFixed(2)],
     [],
     [
       "Category",
@@ -632,7 +806,7 @@ function buildSpreadsheetRows(eventData) {
   }
 
   rows.push([
-    "Category Totals",
+    "Expense Totals",
     "",
     "",
     "",
@@ -644,6 +818,43 @@ function buildSpreadsheetRows(eventData) {
       : totals.isTableOverBudget
         ? "Over Budget"
         : "Within Budget"
+  ]);
+
+  rows.push([]);
+  rows.push([
+    "Funding Source",
+    "Type",
+    "Date",
+    "Notes",
+    "Status",
+    "Planned (USD)",
+    "Actual (USD)",
+    "Difference (USD)"
+  ]);
+
+  for (const inc of eventData.incomes) {
+    const diff = calculateIncomeDifference(inc);
+    rows.push([
+      sanitizeSpreadsheetText(inc.source),
+      sanitizeSpreadsheetText(normalizeIncomeType(inc.type)),
+      sanitizeSpreadsheetText(inc.date || ""),
+      sanitizeSpreadsheetText(inc.notes || ""),
+      normalizeIncomeStatus(inc.status),
+      inc.planned.toFixed(2),
+      inc.actual.toFixed(2),
+      diff.toFixed(2)
+    ]);
+  }
+
+  rows.push([
+    "Funding Totals",
+    "",
+    "",
+    "",
+    "",
+    incomeTotals.totalPlanned.toFixed(2),
+    incomeTotals.totalActual.toFixed(2),
+    incomeTotals.difference.toFixed(2)
   ]);
 
   return rows;
@@ -670,45 +881,65 @@ function buildTsvContent(eventData) {
  */
 function buildTextSummary(eventData) {
   const totals = calculateEventTotals(eventData.categories, eventData.totalPlannedBudget);
+  const incomeTotals = calculateIncomeTotals(eventData.incomes);
+  const net = calculateNetSummary(incomeTotals.totalActual, totals.totalActual);
   const eventTitle = eventData.eventName.trim() || "Untitled Event";
   const overallStatus = totals.isOverallOverBudget
     ? `Over Budget by ${formatMoney(Math.abs(totals.overallRemaining))}`
     : "Within Budget";
+  const netLabel = net.isDeficit ? "Net Deficit" : "Net Surplus";
 
   const lines = [
     `Event Budget Summary: ${eventTitle}`,
     `----------------------------------------`,
     `Total Planned Budget: ${formatMoney(totals.overallPlanned)} USD`,
-    `Total Actual Spending: ${formatMoney(totals.totalActual)} USD`,
-    `Remaining Balance: ${formatMoney(totals.overallRemaining)} USD (${overallStatus})`,
+    `Total Actual Expenses: ${formatMoney(totals.totalActual)} USD`,
+    `Budget Remaining: ${formatMoney(totals.overallRemaining)} USD (${overallStatus})`,
+    `Total Actual Funding: ${formatMoney(incomeTotals.totalActual)} USD (Planned ${formatMoney(incomeTotals.totalPlanned)} USD)`,
+    `Net Profit / Loss: ${formatSignedMoney(net.netBalance)} USD (${netLabel})`,
     ``
   ];
 
   if (eventData.categories.length === 0) {
     lines.push("Expense Categories: None added yet.");
-    return lines.join("\n");
-  }
-
-  const overBudgetItems = eventData.categories.filter((cat) => calculateCategoryStatus(cat).isOver);
-  if (overBudgetItems.length > 0) {
-    lines.push("Over-Budget Categories:");
-    for (const cat of overBudgetItems) {
-      const { remaining } = calculateCategoryStatus(cat);
-      lines.push(`- ${cat.name}: over by ${formatMoney(Math.abs(remaining))} (Planned ${formatMoney(cat.planned)}, Actual ${formatMoney(cat.actual)})`);
+  } else {
+    const overBudgetItems = eventData.categories.filter((cat) => calculateCategoryStatus(cat).isOver);
+    if (overBudgetItems.length > 0) {
+      lines.push("Over-Budget Categories:");
+      for (const cat of overBudgetItems) {
+        const { remaining } = calculateCategoryStatus(cat);
+        lines.push(`- ${cat.name}: over by ${formatMoney(Math.abs(remaining))} (Planned ${formatMoney(cat.planned)}, Actual ${formatMoney(cat.actual)})`);
+      }
+      lines.push("");
     }
-    lines.push("");
+
+    lines.push("Expense Breakdown:");
+    for (const cat of eventData.categories) {
+      const { remaining, isOver } = calculateCategoryStatus(cat);
+      const statusLabel = isOver ? "Over Budget" : "Within Budget";
+      const approval = normalizeApprovalStatus(cat.approvalStatus);
+      const details = [cat.date, cat.notes, approval].filter(Boolean).join(" | ");
+      const detailText = details ? ` [${details}]` : "";
+      lines.push(
+        `- ${cat.name}${detailText}: Planned ${formatMoney(cat.planned)}, Actual ${formatMoney(cat.actual)}, Remaining ${formatMoney(remaining)} (${statusLabel})`
+      );
+    }
   }
 
-  lines.push("Expense Breakdown:");
-  for (const cat of eventData.categories) {
-    const { remaining, isOver } = calculateCategoryStatus(cat);
-    const statusLabel = isOver ? "Over Budget" : "Within Budget";
-    const approval = normalizeApprovalStatus(cat.approvalStatus);
-    const details = [cat.date, cat.notes, approval].filter(Boolean).join(" | ");
-    const detailText = details ? ` [${details}]` : "";
-    lines.push(
-      `- ${cat.name}${detailText}: Planned ${formatMoney(cat.planned)}, Actual ${formatMoney(cat.actual)}, Remaining ${formatMoney(remaining)} (${statusLabel})`
-    );
+  lines.push("");
+  if (eventData.incomes.length === 0) {
+    lines.push("Income & Funding: None added yet.");
+  } else {
+    lines.push("Income & Funding:");
+    for (const inc of eventData.incomes) {
+      const diff = calculateIncomeDifference(inc);
+      const details = [normalizeIncomeType(inc.type), inc.date, inc.notes, normalizeIncomeStatus(inc.status)]
+        .filter(Boolean)
+        .join(" | ");
+      lines.push(
+        `- ${inc.source} [${details}]: Planned ${formatMoney(inc.planned)}, Actual ${formatMoney(inc.actual)} (${formatSignedMoney(diff)})`
+      );
+    }
   }
 
   return lines.join("\n");
@@ -720,7 +951,7 @@ function buildTextSummary(eventData) {
    Updates the DOM, renders charts & forecasts, and connects user inputs.
    ========================================================================== */
 
-// Cached DOM elements
+// Cached DOM elements — Event switcher
 const eventSelect = document.getElementById("event-select");
 const newEventBtn = document.getElementById("new-event-btn");
 const deleteEventBtn = document.getElementById("delete-event-btn");
@@ -731,6 +962,7 @@ const cancelDeleteBtn = document.getElementById("cancel-delete-btn");
 const eventNameInput = document.getElementById("event-name-input");
 const resetDemoBtn = document.getElementById("reset-demo-btn");
 
+// Cached DOM elements — Summary & Exports
 const exportCsvBtn = document.getElementById("export-csv-btn");
 const copyExcelBtn = document.getElementById("copy-excel-btn");
 const copySummaryBtn = document.getElementById("copy-summary-btn");
@@ -742,6 +974,11 @@ const budgetErrorMsg = document.getElementById("budget-error-msg");
 const totalActualEl = document.getElementById("total-actual");
 const totalRemainingEl = document.getElementById("total-remaining");
 const remainingCardEl = document.getElementById("remaining-card");
+const totalIncomeActualEl = document.getElementById("total-income-actual");
+const totalIncomePlannedSubEl = document.getElementById("total-income-planned-sub");
+const netProfitCardEl = document.getElementById("net-profit-card");
+const netProfitValueEl = document.getElementById("net-profit-value");
+const netProfitSubEl = document.getElementById("net-profit-sub");
 const progressPercentEl = document.getElementById("budget-progress-percent");
 const progressDetailEl = document.getElementById("budget-progress-detail");
 const progressTrackEl = document.getElementById("budget-progress-track");
@@ -750,6 +987,7 @@ const budgetMismatchBanner = document.getElementById("budget-mismatch-banner");
 const budgetMismatchText = document.getElementById("budget-mismatch-text");
 const syncBudgetBtn = document.getElementById("sync-budget-btn");
 
+// Cached DOM elements — Expense Filters & Table
 const filterSearchInput = document.getElementById("filter-search-input");
 const filterApprovalSelect = document.getElementById("filter-approval-select");
 const filterOverCheckbox = document.getElementById("filter-over-checkbox");
@@ -772,6 +1010,24 @@ const tableTotalPlannedEl = document.getElementById("table-total-planned");
 const tableTotalActualEl = document.getElementById("table-total-actual");
 const tableTotalRemainingEl = document.getElementById("table-total-remaining");
 const tableTotalStatusEl = document.getElementById("table-total-status");
+
+// Cached DOM elements — Income & Funding Table and Form
+const incomeCountEl = document.getElementById("income-count");
+const incomeErrorMsg = document.getElementById("income-error-msg");
+const incomesTbody = document.getElementById("incomes-tbody");
+const incomeTotalPlannedEl = document.getElementById("income-total-planned");
+const incomeTotalActualEl = document.getElementById("income-total-actual");
+const incomeTotalDiffEl = document.getElementById("income-total-diff");
+
+const addIncomeForm = document.getElementById("add-income-form");
+const newIncomeSourceInput = document.getElementById("new-income-source");
+const newIncomeTypeSelect = document.getElementById("new-income-type");
+const newIncomeDateInput = document.getElementById("new-income-date");
+const newIncomeNotesInput = document.getElementById("new-income-notes");
+const newIncomeStatusSelect = document.getElementById("new-income-status");
+const newIncomePlannedInput = document.getElementById("new-income-planned");
+const newIncomeActualInput = document.getElementById("new-income-actual");
+const incomeFormErrorMsg = document.getElementById("income-form-error-msg");
 
 // Charts DOM elements
 const categoryChartEl = document.getElementById("category-chart");
@@ -905,6 +1161,11 @@ function downloadCsvFile(filename, csvText) {
 function applyApprovalStyle(selectEl, status) {
   selectEl.classList.remove("approval-planned", "approval-approved", "approval-paid");
   selectEl.classList.add(`approval-${status.toLowerCase()}`);
+}
+
+function applyIncomeStatusStyle(selectEl, status) {
+  selectEl.classList.remove("income-expected", "income-received");
+  selectEl.classList.add(`income-${status.toLowerCase()}`);
 }
 
 function renderCharts() {
@@ -1074,6 +1335,8 @@ function renderSummary() {
 
   // Overall event cards always calculate across ALL categories in the active event
   const allTotals = calculateEventTotals(activeEvent.categories, activeEvent.totalPlannedBudget);
+  const incomeTotals = calculateIncomeTotals(activeEvent.incomes);
+  const net = calculateNetSummary(incomeTotals.totalActual, allTotals.totalActual);
 
   totalActualEl.textContent = formatMoney(allTotals.totalActual);
   totalRemainingEl.textContent = formatMoney(allTotals.overallRemaining);
@@ -1087,6 +1350,24 @@ function renderSummary() {
   } else {
     remainingCardEl.classList.add("status-good");
     eventAlertBanner.classList.add("hidden");
+  }
+
+  // Funding & Net Profit/Loss summary cards
+  totalIncomeActualEl.textContent = formatMoney(incomeTotals.totalActual);
+  totalIncomePlannedSubEl.textContent =
+    `Planned: ${formatMoney(incomeTotals.totalPlanned)} USD • Received: ${formatMoney(incomeTotals.receivedActual)} USD`;
+
+  netProfitValueEl.textContent = formatSignedMoney(net.netBalance);
+  netProfitCardEl.classList.remove("status-good", "status-over");
+  if (net.isDeficit) {
+    netProfitCardEl.classList.add("status-over");
+    netProfitSubEl.textContent = `Deficit: expenses exceed funding by ${formatMoney(Math.abs(net.netBalance))}`;
+  } else {
+    netProfitCardEl.classList.add("status-good");
+    netProfitSubEl.textContent =
+      net.netBalance === 0
+        ? "Break-even: funding matches expenses"
+        : `Surplus: ${formatMoney(net.netBalance)} ahead of expenses`;
   }
 
   // Update the visual budget usage progress bar
@@ -1109,7 +1390,7 @@ function renderSummary() {
     budgetMismatchBanner.classList.add("hidden");
   }
 
-  // Table footer sums the currently visible (filtered) rows so the column math always matches
+  // Expense table footer sums the currently visible (filtered) rows
   const isFiltered = hasActiveFilters(filterState);
   const visibleCategories = getFilteredCategories(activeEvent.categories, filterState);
   const tableTotals = calculateEventTotals(visibleCategories, activeEvent.totalPlannedBudget);
@@ -1129,6 +1410,18 @@ function renderSummary() {
     tableTotalRemainingEl.className = "num-col remaining-amount positive";
     tableTotalStatusEl.innerHTML = '<span class="status-badge ok">Within Budget</span>';
   }
+
+  // Income table footer totals
+  incomeTotalPlannedEl.textContent = formatMoney(incomeTotals.totalPlanned);
+  incomeTotalActualEl.textContent = formatMoney(incomeTotals.totalActual);
+  incomeTotalDiffEl.textContent = formatSignedMoney(incomeTotals.difference);
+  incomeTotalDiffEl.className = `num-col remaining-amount ${
+    !incomeTotals.hasIncomes
+      ? "neutral"
+      : incomeTotals.difference < 0
+        ? "negative"
+        : "positive"
+  }`;
 
   // Keep charts and annual forecast live-synced with every budget update
   renderCharts();
@@ -1255,7 +1548,6 @@ function renderCategories() {
       const nextStatus = normalizeApprovalStatus(approvalSelect.value);
       applyApprovalStyle(approvalSelect, nextStatus);
       handleCategoryDetailChange(category.id, "approvalStatus", nextStatus);
-      // Re-render table if filtered by approval status, and always update the approval chart
       if (filterState.approval !== "ALL") {
         renderCategories();
       }
@@ -1329,6 +1621,173 @@ function renderCategories() {
   }
 }
 
+function renderIncomes() {
+  const activeEvent = getActiveEvent();
+  const count = activeEvent.incomes.length;
+  incomeCountEl.textContent = `${count} ${count === 1 ? "source" : "sources"}`;
+  incomesTbody.innerHTML = "";
+
+  if (count === 0) {
+    const emptyRow = document.createElement("tr");
+    const emptyCell = document.createElement("td");
+    emptyCell.colSpan = 9;
+    emptyCell.className = "empty-cell";
+    emptyCell.innerHTML =
+      '<span class="empty-state-title">No funding sources yet</span>' +
+      "Add club allocations, ticket sales, or sponsorships below to calculate net profit or loss.";
+    emptyRow.appendChild(emptyCell);
+    incomesTbody.appendChild(emptyRow);
+    return;
+  }
+
+  for (const income of activeEvent.incomes) {
+    const diff = calculateIncomeDifference(income);
+
+    const row = document.createElement("tr");
+    row.dataset.incomeId = String(income.id);
+
+    // 1. Source Name
+    const sourceCell = document.createElement("td");
+    const sourceInput = document.createElement("input");
+    sourceInput.type = "text";
+    sourceInput.className = "category-name-input";
+    sourceInput.value = income.source;
+    sourceInput.placeholder = "Funding source";
+    sourceInput.setAttribute("aria-label", `Funding source name for ${income.source}`);
+    sourceInput.addEventListener("input", () => {
+      handleIncomeSourceChange(income.id, sourceInput, row);
+    });
+    sourceInput.addEventListener("blur", () => {
+      if (!sourceInput.value.trim()) {
+        sourceInput.value = income.source;
+        sourceInput.classList.remove("input-invalid");
+        clearError(incomeErrorMsg);
+      }
+    });
+    sourceCell.appendChild(sourceInput);
+    row.appendChild(sourceCell);
+
+    // 2. Type dropdown
+    const typeCell = document.createElement("td");
+    const typeSelect = document.createElement("select");
+    typeSelect.className = "table-type-select";
+    typeSelect.setAttribute("aria-label", `${income.source} funding type`);
+    for (const typeOpt of INCOME_TYPE_OPTIONS) {
+      const opt = document.createElement("option");
+      opt.value = typeOpt;
+      opt.textContent = typeOpt;
+      typeSelect.appendChild(opt);
+    }
+    typeSelect.value = normalizeIncomeType(income.type);
+    typeSelect.addEventListener("change", () => {
+      handleIncomeDetailChange(income.id, "type", normalizeIncomeType(typeSelect.value));
+    });
+    typeCell.appendChild(typeSelect);
+    row.appendChild(typeCell);
+
+    // 3. Date
+    const dateCell = document.createElement("td");
+    const dateInput = document.createElement("input");
+    dateInput.type = "date";
+    dateInput.value = income.date || "";
+    dateInput.setAttribute("aria-label", `${income.source} date`);
+    dateInput.addEventListener("change", () => {
+      handleIncomeDetailChange(income.id, "date", dateInput.value);
+    });
+    dateCell.appendChild(dateInput);
+    row.appendChild(dateCell);
+
+    // 4. Notes
+    const notesCell = document.createElement("td");
+    const notesInput = document.createElement("input");
+    notesInput.type = "text";
+    notesInput.value = income.notes || "";
+    notesInput.placeholder = "Details or note";
+    notesInput.setAttribute("aria-label", `${income.source} notes`);
+    notesInput.addEventListener("input", () => {
+      handleIncomeDetailChange(income.id, "notes", notesInput.value);
+    });
+    notesCell.appendChild(notesInput);
+    row.appendChild(notesCell);
+
+    // 5. Status dropdown (Expected / Received)
+    const statusCell = document.createElement("td");
+    const statusSelect = document.createElement("select");
+    statusSelect.className = "approval-select";
+    statusSelect.setAttribute("aria-label", `${income.source} funding status`);
+    for (const statusOpt of INCOME_STATUS_OPTIONS) {
+      const opt = document.createElement("option");
+      opt.value = statusOpt;
+      opt.textContent = statusOpt;
+      statusSelect.appendChild(opt);
+    }
+    const currentStatus = normalizeIncomeStatus(income.status);
+    statusSelect.value = currentStatus;
+    applyIncomeStatusStyle(statusSelect, currentStatus);
+    statusSelect.addEventListener("change", () => {
+      const nextStatus = normalizeIncomeStatus(statusSelect.value);
+      applyIncomeStatusStyle(statusSelect, nextStatus);
+      handleIncomeDetailChange(income.id, "status", nextStatus);
+      renderSummary();
+    });
+    statusCell.appendChild(statusSelect);
+    row.appendChild(statusCell);
+
+    // 6. Planned (USD)
+    const plannedCell = document.createElement("td");
+    plannedCell.className = "num-col";
+    const plannedInput = document.createElement("input");
+    plannedInput.type = "number";
+    plannedInput.min = "0";
+    plannedInput.step = "0.01";
+    plannedInput.value = income.planned;
+    plannedInput.setAttribute("aria-label", `${income.source} planned funding`);
+    plannedInput.addEventListener("input", () => {
+      handleIncomeAmountChange(income.id, "planned", plannedInput);
+    });
+    plannedCell.appendChild(plannedInput);
+    row.appendChild(plannedCell);
+
+    // 7. Actual (USD)
+    const actualCell = document.createElement("td");
+    actualCell.className = "num-col";
+    const actualInput = document.createElement("input");
+    actualInput.type = "number";
+    actualInput.min = "0";
+    actualInput.step = "0.01";
+    actualInput.value = income.actual;
+    actualInput.setAttribute("aria-label", `${income.source} actual funding`);
+    actualInput.addEventListener("input", () => {
+      handleIncomeAmountChange(income.id, "actual", actualInput);
+    });
+    actualCell.appendChild(actualInput);
+    row.appendChild(actualCell);
+
+    // 8. Difference (Actual - Planned)
+    const diffCell = document.createElement("td");
+    diffCell.id = `income-diff-${income.id}`;
+    diffCell.className = `num-col remaining-amount ${diff < 0 ? "negative" : "positive"}`;
+    diffCell.textContent = formatSignedMoney(diff);
+    row.appendChild(diffCell);
+
+    // 9. Remove button
+    const actionCell = document.createElement("td");
+    actionCell.className = "action-col";
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "btn btn-danger";
+    removeBtn.textContent = "Remove";
+    removeBtn.setAttribute("aria-label", `Remove ${income.source} funding source`);
+    removeBtn.addEventListener("click", () => {
+      removeIncome(income.id);
+    });
+    actionCell.appendChild(removeBtn);
+    row.appendChild(actionCell);
+
+    incomesTbody.appendChild(row);
+  }
+}
+
 function handleCategoryNameChange(categoryId, inputEl, rowEl) {
   const trimmed = inputEl.value.trim();
   if (!trimmed) {
@@ -1347,7 +1806,6 @@ function handleCategoryNameChange(categoryId, inputEl, rowEl) {
   category.name = trimmed;
   saveState();
 
-  // Keep screen-reader labels and charts up to date without losing table input focus
   inputEl.setAttribute("aria-label", `Category name for ${trimmed}`);
   const removeBtn = rowEl.querySelector(".btn-danger");
   if (removeBtn) {
@@ -1412,6 +1870,79 @@ function removeCategory(categoryId) {
   clearError(tableErrorMsg);
   saveState();
   renderCategories();
+  renderSummary();
+}
+
+function handleIncomeSourceChange(incomeId, inputEl, rowEl) {
+  const trimmed = inputEl.value.trim();
+  if (!trimmed) {
+    inputEl.classList.add("input-invalid");
+    showError(incomeErrorMsg, "Funding source name cannot be empty.");
+    return;
+  }
+
+  inputEl.classList.remove("input-invalid");
+  clearError(incomeErrorMsg);
+
+  const activeEvent = getActiveEvent();
+  const income = activeEvent.incomes.find((item) => item.id === incomeId);
+  if (!income) return;
+
+  income.source = trimmed;
+  saveState();
+
+  inputEl.setAttribute("aria-label", `Funding source name for ${trimmed}`);
+  const removeBtn = rowEl.querySelector(".btn-danger");
+  if (removeBtn) {
+    removeBtn.setAttribute("aria-label", `Remove ${trimmed} funding source`);
+  }
+}
+
+function handleIncomeDetailChange(incomeId, field, value) {
+  const activeEvent = getActiveEvent();
+  const income = activeEvent.incomes.find((item) => item.id === incomeId);
+  if (!income) return;
+
+  income[field] = value;
+  saveState();
+}
+
+function handleIncomeAmountChange(incomeId, field, inputEl) {
+  const label = field === "planned" ? "Planned funding" : "Actual funding";
+  const result = validateMoney(inputEl.value, label);
+
+  if (!result.valid) {
+    inputEl.classList.add("input-invalid");
+    showError(incomeErrorMsg, result.message);
+    return;
+  }
+
+  inputEl.classList.remove("input-invalid");
+  clearError(incomeErrorMsg);
+
+  const activeEvent = getActiveEvent();
+  const income = activeEvent.incomes.find((item) => item.id === incomeId);
+  if (!income) return;
+
+  income[field] = result.value;
+  saveState();
+
+  const diff = calculateIncomeDifference(income);
+  const diffCell = document.getElementById(`income-diff-${income.id}`);
+  if (diffCell) {
+    diffCell.textContent = formatSignedMoney(diff);
+    diffCell.className = `num-col remaining-amount ${diff < 0 ? "negative" : "positive"}`;
+  }
+
+  renderSummary();
+}
+
+function removeIncome(incomeId) {
+  const activeEvent = getActiveEvent();
+  activeEvent.incomes = activeEvent.incomes.filter((item) => item.id !== incomeId);
+  clearError(incomeErrorMsg);
+  saveState();
+  renderIncomes();
   renderSummary();
 }
 
@@ -1480,8 +2011,11 @@ function renderAll() {
   clearError(budgetErrorMsg);
   clearError(formErrorMsg);
   clearError(tableErrorMsg);
+  clearError(incomeErrorMsg);
+  clearError(incomeFormErrorMsg);
   syncForecastInputs();
   renderCategories();
+  renderIncomes();
   renderSummary();
 }
 
@@ -1502,7 +2036,8 @@ newEventBtn.addEventListener("click", () => {
     id: createEventId(),
     eventName: `New Club Event ${appState.events.length + 1}`,
     totalPlannedBudget: 0,
-    categories: []
+    categories: [],
+    incomes: []
   };
   appState.events.push(newEvent);
   appState.activeEventId = newEvent.id;
@@ -1543,7 +2078,6 @@ eventNameInput.addEventListener("input", () => {
   activeEvent.eventName = eventNameInput.value;
   saveState();
 
-  // Keep the Saved Events dropdown label live-synced with the Event Name input
   const activeOption = eventSelect.querySelector(`option[value="${activeEvent.id}"]`);
   if (activeOption) {
     activeOption.textContent = activeEvent.eventName.trim() || "Untitled Event";
@@ -1653,6 +2187,56 @@ addCategoryForm.addEventListener("submit", (event) => {
   newCategoryNameInput.focus();
 
   renderCategories();
+  renderSummary();
+});
+
+addIncomeForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  clearError(incomeFormErrorMsg);
+
+  const source = newIncomeSourceInput.value.trim();
+  if (!source) {
+    showError(incomeFormErrorMsg, "Please enter a funding source name (for example, Ticket Sales).");
+    newIncomeSourceInput.focus();
+    return;
+  }
+
+  const plannedCheck = validateMoney(newIncomePlannedInput.value, "Planned funding");
+  if (!plannedCheck.valid) {
+    showError(incomeFormErrorMsg, plannedCheck.message);
+    newIncomePlannedInput.focus();
+    return;
+  }
+
+  const actualCheck = validateMoney(newIncomeActualInput.value, "Actual funding");
+  if (!actualCheck.valid) {
+    showError(incomeFormErrorMsg, actualCheck.message);
+    newIncomeActualInput.focus();
+    return;
+  }
+
+  const activeEvent = getActiveEvent();
+  const nextId =
+    activeEvent.incomes.length > 0
+      ? Math.max(...activeEvent.incomes.map((inc) => inc.id)) + 1
+      : 1;
+
+  activeEvent.incomes.push({
+    id: nextId,
+    source,
+    type: normalizeIncomeType(newIncomeTypeSelect.value),
+    date: newIncomeDateInput.value,
+    notes: newIncomeNotesInput.value.trim(),
+    status: normalizeIncomeStatus(newIncomeStatusSelect.value),
+    planned: plannedCheck.value,
+    actual: actualCheck.value
+  });
+
+  saveState();
+  addIncomeForm.reset();
+  newIncomeSourceInput.focus();
+
+  renderIncomes();
   renderSummary();
 });
 
