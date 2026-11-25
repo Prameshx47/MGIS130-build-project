@@ -382,6 +382,12 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
   currency: "USD"
 });
 
+const reportDateFormatter = new Intl.DateTimeFormat("en-US", {
+  year: "numeric",
+  month: "long",
+  day: "numeric"
+});
+
 function formatMoney(amount) {
   return currencyFormatter.format(amount);
 }
@@ -389,6 +395,10 @@ function formatMoney(amount) {
 function formatSignedMoney(amount) {
   if (amount > 0) return `+${formatMoney(amount)}`;
   return formatMoney(amount);
+}
+
+function formatReportDate(dateObj = new Date()) {
+  return reportDateFormatter.format(dateObj);
 }
 
 /**
@@ -948,7 +958,7 @@ function buildTextSummary(eventData) {
 
 /* ==========================================================================
    3. PRESENTATION LAYER (DISPLAY & EVENTS)
-   Updates the DOM, renders charts & forecasts, and connects user inputs.
+   Updates the DOM, renders charts, forecasts, print reports, and user events.
    ========================================================================== */
 
 // Cached DOM elements — Event switcher
@@ -966,6 +976,8 @@ const resetDemoBtn = document.getElementById("reset-demo-btn");
 const exportCsvBtn = document.getElementById("export-csv-btn");
 const copyExcelBtn = document.getElementById("copy-excel-btn");
 const copySummaryBtn = document.getElementById("copy-summary-btn");
+const printReportBtn = document.getElementById("print-report-btn");
+const printReportContainer = document.getElementById("print-report");
 const exportStatusMsg = document.getElementById("export-status-msg");
 const eventAlertBanner = document.getElementById("event-alert-banner");
 const eventOverAmount = document.getElementById("event-over-amount");
@@ -1103,6 +1115,385 @@ function renderEventSwitcher() {
   deleteEventBtn.title = isOnlyEvent
     ? "At least one event must remain saved"
     : "Delete the selected event";
+}
+
+/**
+ * Helper to create a DOM element with optional className and textContent.
+ */
+function createEl(tag, className, text) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (text !== undefined && text !== null) el.textContent = text;
+  return el;
+}
+
+/**
+ * Builds the printable report for the selected event using ALL unfiltered rows
+ * and the app's existing calculation functions.
+ */
+function renderPrintReport(eventData) {
+  if (!printReportContainer || !eventData) return;
+
+  // Always calculate from ALL rows for the selected event (ignoring active UI filters)
+  const totals = calculateEventTotals(eventData.categories, eventData.totalPlannedBudget);
+  const incomeTotals = calculateIncomeTotals(eventData.incomes);
+  const net = calculateNetSummary(incomeTotals.totalActual, totals.totalActual);
+  const eventTitle = eventData.eventName.trim() || "Untitled Event";
+  const reportDate = formatReportDate(new Date());
+
+  const overBudgetExpenses = eventData.categories.filter(
+    (cat) => calculateCategoryStatus(cat).isOver
+  );
+  const expectedFunding = eventData.incomes.filter(
+    (inc) => normalizeIncomeStatus(inc.status) === "Expected"
+  );
+
+  printReportContainer.innerHTML = "";
+
+  // 1. Report Header (Event Name & Report Date)
+  const headerEl = createEl("header", "print-header");
+  const titleWrap = createEl("div");
+  titleWrap.appendChild(createEl("p", "print-kicker", "Club Event Budget Report"));
+  titleWrap.appendChild(createEl("h1", "print-title", eventTitle));
+
+  const metaWrap = createEl("div", "print-meta");
+  metaWrap.appendChild(createEl("p", null, `Report Date: ${reportDate}`));
+  metaWrap.appendChild(createEl("p", null, "All amounts in U.S. Dollars (USD)"));
+
+  headerEl.appendChild(titleWrap);
+  headerEl.appendChild(metaWrap);
+  printReportContainer.appendChild(headerEl);
+
+  // 2. Financial Overview (Budget + Funding + Net Surplus/Deficit)
+  const summarySection = createEl("section", "print-section");
+  summarySection.appendChild(createEl("h2", "print-section-title", "Financial Summary (USD)"));
+
+  const summaryGrid = createEl("div", "print-summary-grid");
+
+  const addSummaryBox = (label, value, sub, toneClass) => {
+    const box = createEl("div", `print-summary-box${toneClass ? ` ${toneClass}` : ""}`);
+    box.appendChild(createEl("span", "print-summary-label", label));
+    box.appendChild(createEl("strong", "print-summary-value", value));
+    if (sub) {
+      box.appendChild(createEl("span", "print-summary-sub", sub));
+    }
+    summaryGrid.appendChild(box);
+  };
+
+  addSummaryBox(
+    "Planned Budget",
+    formatMoney(totals.overallPlanned),
+    `Category plans: ${formatMoney(totals.categoriesPlanned)}`
+  );
+  addSummaryBox(
+    "Actual Expenses",
+    formatMoney(totals.totalActual),
+    `${totals.usedPercent}% of planned budget`
+  );
+  addSummaryBox(
+    "Remaining Balance",
+    formatMoney(totals.overallRemaining),
+    totals.isOverallOverBudget
+      ? `Over budget by ${formatMoney(Math.abs(totals.overallRemaining))}`
+      : "Within planned budget",
+    totals.isOverallOverBudget ? "is-danger" : "is-good"
+  );
+  addSummaryBox(
+    "Net Surplus / Deficit",
+    formatSignedMoney(net.netBalance),
+    net.isDeficit
+      ? "Net Deficit (expenses exceed funding)"
+      : net.netBalance === 0
+        ? "Break-Even"
+        : "Net Surplus (funding exceeds expenses)",
+    net.isDeficit ? "is-danger" : "is-good"
+  );
+
+  addSummaryBox(
+    "Planned Income / Funding",
+    formatMoney(incomeTotals.totalPlanned),
+    `${eventData.incomes.length} ${eventData.incomes.length === 1 ? "source" : "sources"} listed`
+  );
+  addSummaryBox(
+    "Actual Income / Funding",
+    formatMoney(incomeTotals.totalActual),
+    `Variance vs. plan: ${formatSignedMoney(incomeTotals.difference)}`
+  );
+  addSummaryBox(
+    "Received Funding",
+    formatMoney(incomeTotals.receivedActual),
+    "Marked as Received"
+  );
+  const expectedAmount = Math.round(
+    expectedFunding.reduce((sum, item) => sum + item.actual, 0) * 100
+  ) / 100;
+  addSummaryBox(
+    "Expected (Not Received)",
+    formatMoney(expectedAmount),
+    `${expectedFunding.length} pending ${expectedFunding.length === 1 ? "source" : "sources"}`
+  );
+
+  summarySection.appendChild(summaryGrid);
+
+  if (totals.hasPlanMismatch) {
+    summarySection.appendChild(
+      createEl(
+        "p",
+        "print-note",
+        `Note: Total Planned Budget (${formatMoney(totals.overallPlanned)} USD) differs from the sum of category plans (${formatMoney(totals.categoriesPlanned)} USD).`
+      )
+    );
+  }
+
+  printReportContainer.appendChild(summarySection);
+
+  // 3. Attention Items: Over-Budget Expenses & Expected Funding Not Yet Received
+  const alertsSection = createEl("section", "print-section");
+  alertsSection.appendChild(createEl("h2", "print-section-title", "Items Requiring Attention"));
+
+  const alertsGrid = createEl("div", "print-alerts-grid");
+
+  // Over-budget expenses box
+  const overBox = createEl(
+    "div",
+    `print-alert-box${overBudgetExpenses.length > 0 ? " has-items" : ""}`
+  );
+  overBox.appendChild(
+    createEl("h3", null, `Over-Budget Expenses (${overBudgetExpenses.length})`)
+  );
+
+  if (overBudgetExpenses.length === 0) {
+    overBox.appendChild(
+      createEl("p", "print-alert-empty", "None — all expense categories are within budget.")
+    );
+  } else {
+    const list = createEl("ul", "print-alert-list");
+    for (const cat of overBudgetExpenses) {
+      const { remaining } = calculateCategoryStatus(cat);
+      const approval = normalizeApprovalStatus(cat.approvalStatus);
+      list.appendChild(
+        createEl(
+          "li",
+          null,
+          `${cat.name} (${approval}): Planned ${formatMoney(cat.planned)}, Actual ${formatMoney(cat.actual)} — over by ${formatMoney(Math.abs(remaining))}`
+        )
+      );
+    }
+    overBox.appendChild(list);
+  }
+
+  // Expected (not yet received) funding box
+  const pendingBox = createEl(
+    "div",
+    `print-alert-box${expectedFunding.length > 0 ? " has-pending" : ""}`
+  );
+  pendingBox.appendChild(
+    createEl("h3", null, `Expected Funding Not Yet Received (${expectedFunding.length})`)
+  );
+
+  if (expectedFunding.length === 0) {
+    pendingBox.appendChild(
+      createEl("p", "print-alert-empty", "None — all listed funding sources have been received.")
+    );
+  } else {
+    const list = createEl("ul", "print-alert-list");
+    for (const inc of expectedFunding) {
+      const typeLabel = normalizeIncomeType(inc.type);
+      const dateText = inc.date ? ` • ${inc.date}` : "";
+      list.appendChild(
+        createEl(
+          "li",
+          null,
+          `${inc.source} (${typeLabel}${dateText}): Planned ${formatMoney(inc.planned)}, Actual ${formatMoney(inc.actual)} — Status: Expected`
+        )
+      );
+    }
+    pendingBox.appendChild(list);
+  }
+
+  alertsGrid.appendChild(overBox);
+  alertsGrid.appendChild(pendingBox);
+  alertsSection.appendChild(alertsGrid);
+  printReportContainer.appendChild(alertsSection);
+
+  // 4. All Expense Breakdown Rows
+  const expensesSection = createEl("section", "print-section");
+  expensesSection.appendChild(
+    createEl("h2", "print-section-title", `Expense Breakdown — All Rows (${eventData.categories.length})`)
+  );
+
+  const expTable = createEl("table", "print-table");
+  const expThead = createEl("thead");
+  const expHeadRow = createEl("tr");
+  const expHeaders = [
+    { label: "Category" },
+    { label: "Date" },
+    { label: "Notes / Vendor" },
+    { label: "Approval" },
+    { label: "Planned (USD)", cls: "num-col" },
+    { label: "Actual (USD)", cls: "num-col" },
+    { label: "Remaining (USD)", cls: "num-col" },
+    { label: "Budget Status" }
+  ];
+  for (const h of expHeaders) {
+    const th = createEl("th", h.cls || null, h.label);
+    th.scope = "col";
+    expHeadRow.appendChild(th);
+  }
+  expThead.appendChild(expHeadRow);
+  expTable.appendChild(expThead);
+
+  const expTbody = createEl("tbody");
+  if (eventData.categories.length === 0) {
+    const emptyTr = createEl("tr");
+    const emptyTd = createEl("td", "print-empty-row", "No expense categories recorded for this event.");
+    emptyTd.colSpan = 8;
+    emptyTr.appendChild(emptyTd);
+    expTbody.appendChild(emptyTr);
+  } else {
+    for (const cat of eventData.categories) {
+      const { remaining, isOver } = calculateCategoryStatus(cat);
+      const tr = createEl("tr", isOver ? "is-over" : null);
+      tr.appendChild(createEl("td", null, cat.name));
+      tr.appendChild(createEl("td", null, cat.date || "—"));
+      tr.appendChild(createEl("td", null, cat.notes || "—"));
+      tr.appendChild(createEl("td", null, normalizeApprovalStatus(cat.approvalStatus)));
+      tr.appendChild(createEl("td", "num-col", formatMoney(cat.planned)));
+      tr.appendChild(createEl("td", "num-col", formatMoney(cat.actual)));
+      tr.appendChild(
+        createEl(
+          "td",
+          `num-col ${isOver ? "print-text-danger" : "print-text-good"}`,
+          formatMoney(remaining)
+        )
+      );
+      tr.appendChild(
+        createEl(
+          "td",
+          isOver ? "print-text-danger" : "print-text-good",
+          isOver ? "Over Budget" : "Within Budget"
+        )
+      );
+      expTbody.appendChild(tr);
+    }
+  }
+  expTable.appendChild(expTbody);
+
+  const expTfoot = createEl("tfoot");
+  const expFootRow = createEl("tr");
+  const expFootLabel = createEl("th", null, "Total Expenses");
+  expFootLabel.scope = "row";
+  expFootLabel.colSpan = 4;
+  expFootRow.appendChild(expFootLabel);
+  expFootRow.appendChild(createEl("td", "num-col", formatMoney(totals.categoriesPlanned)));
+  expFootRow.appendChild(createEl("td", "num-col", formatMoney(totals.totalActual)));
+  expFootRow.appendChild(
+    createEl(
+      "td",
+      `num-col ${!totals.hasCategories ? "" : totals.isTableOverBudget ? "print-text-danger" : "print-text-good"}`,
+      formatMoney(totals.tableRemaining)
+    )
+  );
+  expFootRow.appendChild(
+    createEl(
+      "td",
+      !totals.hasCategories ? null : totals.isTableOverBudget ? "print-text-danger" : "print-text-good",
+      !totals.hasCategories
+        ? "No Expenses"
+        : totals.isTableOverBudget
+          ? "Over Budget"
+          : "Within Budget"
+    )
+  );
+  expTfoot.appendChild(expFootRow);
+  expTable.appendChild(expTfoot);
+
+  expensesSection.appendChild(expTable);
+  printReportContainer.appendChild(expensesSection);
+
+  // 5. All Income & Funding Rows
+  const incomeSection = createEl("section", "print-section");
+  incomeSection.appendChild(
+    createEl("h2", "print-section-title", `Income & Funding — All Rows (${eventData.incomes.length})`)
+  );
+
+  const incTable = createEl("table", "print-table");
+  const incThead = createEl("thead");
+  const incHeadRow = createEl("tr");
+  const incHeaders = [
+    { label: "Funding Source" },
+    { label: "Type" },
+    { label: "Date" },
+    { label: "Notes" },
+    { label: "Status" },
+    { label: "Planned (USD)", cls: "num-col" },
+    { label: "Actual (USD)", cls: "num-col" },
+    { label: "Difference (USD)", cls: "num-col" }
+  ];
+  for (const h of incHeaders) {
+    const th = createEl("th", h.cls || null, h.label);
+    th.scope = "col";
+    incHeadRow.appendChild(th);
+  }
+  incThead.appendChild(incHeadRow);
+  incTable.appendChild(incThead);
+
+  const incTbody = createEl("tbody");
+  if (eventData.incomes.length === 0) {
+    const emptyTr = createEl("tr");
+    const emptyTd = createEl("td", "print-empty-row", "No funding sources recorded for this event.");
+    emptyTd.colSpan = 8;
+    emptyTr.appendChild(emptyTd);
+    incTbody.appendChild(emptyTr);
+  } else {
+    for (const inc of eventData.incomes) {
+      const diff = calculateIncomeDifference(inc);
+      const tr = createEl("tr");
+      tr.appendChild(createEl("td", null, inc.source));
+      tr.appendChild(createEl("td", null, normalizeIncomeType(inc.type)));
+      tr.appendChild(createEl("td", null, inc.date || "—"));
+      tr.appendChild(createEl("td", null, inc.notes || "—"));
+      tr.appendChild(createEl("td", null, normalizeIncomeStatus(inc.status)));
+      tr.appendChild(createEl("td", "num-col", formatMoney(inc.planned)));
+      tr.appendChild(createEl("td", "num-col", formatMoney(inc.actual)));
+      tr.appendChild(
+        createEl(
+          "td",
+          `num-col ${diff < 0 ? "print-text-danger" : "print-text-good"}`,
+          formatSignedMoney(diff)
+        )
+      );
+      incTbody.appendChild(tr);
+    }
+  }
+  incTable.appendChild(incTbody);
+
+  const incTfoot = createEl("tfoot");
+  const incFootRow = createEl("tr");
+  const incFootLabel = createEl("th", null, "Total Funding");
+  incFootLabel.scope = "row";
+  incFootLabel.colSpan = 5;
+  incFootRow.appendChild(incFootLabel);
+  incFootRow.appendChild(createEl("td", "num-col", formatMoney(incomeTotals.totalPlanned)));
+  incFootRow.appendChild(createEl("td", "num-col", formatMoney(incomeTotals.totalActual)));
+  incFootRow.appendChild(
+    createEl(
+      "td",
+      `num-col ${!incomeTotals.hasIncomes ? "" : incomeTotals.difference < 0 ? "print-text-danger" : "print-text-good"}`,
+      formatSignedMoney(incomeTotals.difference)
+    )
+  );
+  incTfoot.appendChild(incFootRow);
+  incTable.appendChild(incTfoot);
+
+  incomeSection.appendChild(incTable);
+  printReportContainer.appendChild(incomeSection);
+
+  // 6. Report Footer
+  const footerEl = createEl("footer", "print-footer");
+  footerEl.appendChild(createEl("span", null, "Generated locally in your browser by Club Event Budget Tracker."));
+  footerEl.appendChild(createEl("span", null, "All financial data stays on your device."));
+  printReportContainer.appendChild(footerEl);
 }
 
 /**
@@ -2282,6 +2673,15 @@ copySummaryBtn.addEventListener("click", async () => {
   } else {
     showExportStatus("Could not copy the summary in this browser.", true);
   }
+});
+
+printReportBtn.addEventListener("click", () => {
+  renderPrintReport(getActiveEvent());
+  window.print();
+});
+
+window.addEventListener("beforeprint", () => {
+  renderPrintReport(getActiveEvent());
 });
 
 // Start the app
