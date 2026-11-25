@@ -1,6 +1,6 @@
 /* ==========================================================================
    1. DATA LAYER
-   Holds the state of the event, fictional demo data, and browser storage.
+   Holds multi-event state, fictional demo data, and browser storage.
    ========================================================================== */
 
 const STORAGE_KEY = "club_event_budget_tracker_v1";
@@ -14,35 +14,75 @@ const DEFAULT_FORECAST = {
 };
 
 const DEFAULT_STATE = {
-  eventName: "Welcome Week Club Social",
-  totalPlannedBudget: 1000,
-  categories: [
+  activeEventId: "evt-welcome-week",
+  events: [
     {
-      id: 1,
-      name: "Venue",
-      date: "2026-09-10",
-      notes: "Student Union Ballroom",
-      approvalStatus: "Paid",
-      planned: 400,
-      actual: 375
+      id: "evt-welcome-week",
+      eventName: "Welcome Week Club Social",
+      totalPlannedBudget: 1000,
+      categories: [
+        {
+          id: 1,
+          name: "Venue",
+          date: "2026-09-10",
+          notes: "Student Union Ballroom",
+          approvalStatus: "Paid",
+          planned: 400,
+          actual: 375
+        },
+        {
+          id: 2,
+          name: "Food",
+          date: "2026-09-12",
+          notes: "Campus Catering",
+          approvalStatus: "Approved",
+          planned: 400,
+          actual: 425
+        },
+        {
+          id: 3,
+          name: "Supplies",
+          date: "2026-09-14",
+          notes: "Print Shop & Flyers",
+          approvalStatus: "Planned",
+          planned: 200,
+          actual: 125
+        }
+      ]
     },
     {
-      id: 2,
-      name: "Food",
-      date: "2026-09-12",
-      notes: "Campus Catering",
-      approvalStatus: "Approved",
-      planned: 400,
-      actual: 425
-    },
-    {
-      id: 3,
-      name: "Supplies",
-      date: "2026-09-14",
-      notes: "Print Shop & Flyers",
-      approvalStatus: "Planned",
-      planned: 200,
-      actual: 125
+      id: "evt-spring-networking",
+      eventName: "Spring Networking Night",
+      totalPlannedBudget: 1500,
+      categories: [
+        {
+          id: 1,
+          name: "Venue & AV",
+          date: "2027-02-18",
+          notes: "Campus Innovation Hall",
+          approvalStatus: "Paid",
+          planned: 600,
+          actual: 550
+        },
+        {
+          id: 2,
+          name: "Refreshments",
+          date: "2027-02-18",
+          notes: "Local Bakery & Coffee",
+          approvalStatus: "Approved",
+          planned: 650,
+          actual: 620
+        },
+        {
+          id: 3,
+          name: "Name Badges & Signage",
+          date: "2027-02-15",
+          notes: "Campus Print Center",
+          approvalStatus: "Planned",
+          planned: 250,
+          actual: 180
+        }
+      ]
     }
   ],
   yearForecast: { ...DEFAULT_FORECAST }
@@ -57,6 +97,67 @@ let filterState = {
   approval: "ALL",
   overBudgetOnly: false
 };
+
+function createEventId() {
+  return `evt-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+function sanitizeCategory(raw, fallbackId) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const id =
+    typeof source.id === "number" && Number.isFinite(source.id)
+      ? source.id
+      : fallbackId;
+  const plannedNum = Number(source.planned);
+  const actualNum = Number(source.actual);
+
+  return {
+    id,
+    name: typeof source.name === "string" && source.name.trim() ? source.name : "Untitled Category",
+    date: typeof source.date === "string" ? source.date : "",
+    notes: typeof source.notes === "string" ? source.notes : "",
+    approvalStatus: normalizeApprovalStatus(source.approvalStatus),
+    planned:
+      Number.isFinite(plannedNum) && plannedNum >= 0
+        ? Math.round(plannedNum * 100) / 100
+        : 0,
+    actual:
+      Number.isFinite(actualNum) && actualNum >= 0
+        ? Math.round(actualNum * 100) / 100
+        : 0
+  };
+}
+
+function sanitizeEvent(raw, fallbackIndex) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const id =
+    typeof source.id === "string" && source.id.trim()
+      ? source.id
+      : `evt-saved-${fallbackIndex + 1}`;
+  const eventName =
+    typeof source.eventName === "string" ? source.eventName : `Club Event ${fallbackIndex + 1}`;
+  const categories = Array.isArray(source.categories)
+    ? source.categories.map((item, idx) => sanitizeCategory(item, idx + 1))
+    : [];
+
+  const hasValidBudget =
+    typeof source.totalPlannedBudget === "number" &&
+    Number.isFinite(source.totalPlannedBudget) &&
+    source.totalPlannedBudget >= 0;
+
+  const totalPlannedBudget = hasValidBudget
+    ? Math.round(source.totalPlannedBudget * 100) / 100
+    : Math.round(
+        categories.reduce((sum, item) => sum + item.planned, 0) * 100
+      ) / 100;
+
+  return {
+    id,
+    eventName,
+    totalPlannedBudget,
+    categories
+  };
+}
 
 function sanitizeForecast(raw) {
   const source = raw && typeof raw === "object" ? raw : {};
@@ -102,33 +203,29 @@ function loadState() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
+
+      // Multi-event saved format
+      if (parsed && Array.isArray(parsed.events) && parsed.events.length > 0) {
+        const events = parsed.events.map((evt, idx) => sanitizeEvent(evt, idx));
+        const hasActive = events.some((evt) => evt.id === parsed.activeEventId);
+        return {
+          activeEventId: hasActive ? parsed.activeEventId : events[0].id,
+          events,
+          yearForecast: sanitizeForecast(parsed.yearForecast)
+        };
+      }
+
+      // Automatic migration from older single-event saved format
       if (parsed && typeof parsed.eventName === "string" && Array.isArray(parsed.categories)) {
-        // Fill in totalPlannedBudget if older saved data does not have it yet
-        const hasValidBudget =
-          typeof parsed.totalPlannedBudget === "number" &&
-          Number.isFinite(parsed.totalPlannedBudget) &&
-          parsed.totalPlannedBudget >= 0;
-
-        if (!hasValidBudget) {
-          const categorySum = parsed.categories.reduce(
-            (sum, item) => sum + (Number(item.planned) || 0),
-            0
-          );
-          parsed.totalPlannedBudget = Math.round(categorySum * 100) / 100;
-        }
-
-        // Fill in detail fields (date, notes, approvalStatus) for older saved rows
-        parsed.categories = parsed.categories.map((item) => ({
-          ...item,
-          date: typeof item.date === "string" ? item.date : "",
-          notes: typeof item.notes === "string" ? item.notes : "",
-          approvalStatus: normalizeApprovalStatus(item.approvalStatus)
-        }));
-
-        // Fill in annual forecast defaults for older saved data
-        parsed.yearForecast = sanitizeForecast(parsed.yearForecast);
-
-        return parsed;
+        const migratedEvent = sanitizeEvent(
+          { ...parsed, id: "evt-migrated-1" },
+          0
+        );
+        return {
+          activeEventId: migratedEvent.id,
+          events: [migratedEvent],
+          yearForecast: sanitizeForecast(parsed.yearForecast)
+        };
       }
     }
   } catch (error) {
@@ -147,11 +244,24 @@ function saveState() {
 
 function cloneDefaultState() {
   return {
-    eventName: DEFAULT_STATE.eventName,
-    totalPlannedBudget: DEFAULT_STATE.totalPlannedBudget,
-    categories: DEFAULT_STATE.categories.map((item) => ({ ...item })),
+    activeEventId: DEFAULT_STATE.activeEventId,
+    events: DEFAULT_STATE.events.map((evt) => ({
+      id: evt.id,
+      eventName: evt.eventName,
+      totalPlannedBudget: evt.totalPlannedBudget,
+      categories: evt.categories.map((item) => ({ ...item }))
+    })),
     yearForecast: { ...DEFAULT_FORECAST }
   };
+}
+
+function getActiveEvent() {
+  const match = appState.events.find((evt) => evt.id === appState.activeEventId);
+  if (match) {
+    return match;
+  }
+  appState.activeEventId = appState.events[0].id;
+  return appState.events[0];
 }
 
 
@@ -485,9 +595,9 @@ function makeSafeFilename(eventName) {
 /**
  * Builds spreadsheet rows shared by CSV download and Copy for Excel.
  */
-function buildSpreadsheetRows(state) {
-  const totals = calculateEventTotals(state.categories, state.totalPlannedBudget);
-  const eventTitle = sanitizeSpreadsheetText(state.eventName.trim() || "Untitled Event");
+function buildSpreadsheetRows(eventData) {
+  const totals = calculateEventTotals(eventData.categories, eventData.totalPlannedBudget);
+  const eventTitle = sanitizeSpreadsheetText(eventData.eventName.trim() || "Untitled Event");
   const rows = [
     ["Event Name", eventTitle],
     ["Total Planned Budget (USD)", totals.overallPlanned.toFixed(2)],
@@ -507,7 +617,7 @@ function buildSpreadsheetRows(state) {
     ]
   ];
 
-  for (const cat of state.categories) {
+  for (const cat of eventData.categories) {
     const { remaining, isOver } = calculateCategoryStatus(cat);
     rows.push([
       sanitizeSpreadsheetText(cat.name),
@@ -542,25 +652,25 @@ function buildSpreadsheetRows(state) {
 /**
  * Builds a complete CSV string (comma-separated values) for Excel.
  */
-function buildCsvContent(state) {
-  const rows = buildSpreadsheetRows(state);
+function buildCsvContent(eventData) {
+  const rows = buildSpreadsheetRows(eventData);
   return rows.map((row) => row.map(escapeCsvValue).join(",")).join("\r\n");
 }
 
 /**
  * Builds a tab-separated string that pastes straight into Excel or Google Sheets columns.
  */
-function buildTsvContent(state) {
-  const rows = buildSpreadsheetRows(state);
+function buildTsvContent(eventData) {
+  const rows = buildSpreadsheetRows(eventData);
   return rows.map((row) => row.map(sanitizeTsvCell).join("\t")).join("\n");
 }
 
 /**
  * Builds a plain-text budget recap ready to email or message to officers/advisors.
  */
-function buildTextSummary(state) {
-  const totals = calculateEventTotals(state.categories, state.totalPlannedBudget);
-  const eventTitle = state.eventName.trim() || "Untitled Event";
+function buildTextSummary(eventData) {
+  const totals = calculateEventTotals(eventData.categories, eventData.totalPlannedBudget);
+  const eventTitle = eventData.eventName.trim() || "Untitled Event";
   const overallStatus = totals.isOverallOverBudget
     ? `Over Budget by ${formatMoney(Math.abs(totals.overallRemaining))}`
     : "Within Budget";
@@ -574,12 +684,12 @@ function buildTextSummary(state) {
     ``
   ];
 
-  if (state.categories.length === 0) {
+  if (eventData.categories.length === 0) {
     lines.push("Expense Categories: None added yet.");
     return lines.join("\n");
   }
 
-  const overBudgetItems = state.categories.filter((cat) => calculateCategoryStatus(cat).isOver);
+  const overBudgetItems = eventData.categories.filter((cat) => calculateCategoryStatus(cat).isOver);
   if (overBudgetItems.length > 0) {
     lines.push("Over-Budget Categories:");
     for (const cat of overBudgetItems) {
@@ -590,7 +700,7 @@ function buildTextSummary(state) {
   }
 
   lines.push("Expense Breakdown:");
-  for (const cat of state.categories) {
+  for (const cat of eventData.categories) {
     const { remaining, isOver } = calculateCategoryStatus(cat);
     const statusLabel = isOver ? "Over Budget" : "Within Budget";
     const approval = normalizeApprovalStatus(cat.approvalStatus);
@@ -611,8 +721,16 @@ function buildTextSummary(state) {
    ========================================================================== */
 
 // Cached DOM elements
+const eventSelect = document.getElementById("event-select");
+const newEventBtn = document.getElementById("new-event-btn");
+const deleteEventBtn = document.getElementById("delete-event-btn");
+const deleteConfirmBar = document.getElementById("delete-confirm-bar");
+const deleteConfirmText = document.getElementById("delete-confirm-text");
+const confirmDeleteBtn = document.getElementById("confirm-delete-btn");
+const cancelDeleteBtn = document.getElementById("cancel-delete-btn");
 const eventNameInput = document.getElementById("event-name-input");
 const resetDemoBtn = document.getElementById("reset-demo-btn");
+
 const exportCsvBtn = document.getElementById("export-csv-btn");
 const copyExcelBtn = document.getElementById("copy-excel-btn");
 const copySummaryBtn = document.getElementById("copy-summary-btn");
@@ -707,6 +825,30 @@ function showExportStatus(message, isError = false) {
   }, 4000);
 }
 
+function hideDeleteConfirm() {
+  deleteConfirmBar.classList.add("hidden");
+}
+
+function renderEventSwitcher() {
+  const activeEvent = getActiveEvent();
+  eventSelect.innerHTML = "";
+
+  for (const evt of appState.events) {
+    const option = document.createElement("option");
+    option.value = evt.id;
+    option.textContent = evt.eventName.trim() || "Untitled Event";
+    eventSelect.appendChild(option);
+  }
+
+  eventSelect.value = activeEvent.id;
+
+  const isOnlyEvent = appState.events.length <= 1;
+  deleteEventBtn.disabled = isOnlyEvent;
+  deleteEventBtn.title = isOnlyEvent
+    ? "At least one event must remain saved"
+    : "Delete the selected event";
+}
+
 /**
  * Copies text to the user's clipboard with a safe fallback for older browsers.
  */
@@ -766,10 +908,12 @@ function applyApprovalStyle(selectEl, status) {
 }
 
 function renderCharts() {
+  const activeEvent = getActiveEvent();
+
   // 1. Planned vs. Actual by Category horizontal bar chart
   categoryChartEl.innerHTML = "";
 
-  if (appState.categories.length === 0) {
+  if (activeEvent.categories.length === 0) {
     const emptyMsg = document.createElement("div");
     emptyMsg.className = "chart-empty";
     emptyMsg.textContent = "Add at least one expense category to see the Planned vs. Actual comparison chart.";
@@ -777,10 +921,10 @@ function renderCharts() {
   } else {
     const maxAmount = Math.max(
       1,
-      ...appState.categories.map((cat) => Math.max(cat.planned, cat.actual))
+      ...activeEvent.categories.map((cat) => Math.max(cat.planned, cat.actual))
     );
 
-    for (const cat of appState.categories) {
+    for (const cat of activeEvent.categories) {
       const { remaining, isOver } = calculateCategoryStatus(cat);
       const plannedWidth = Math.round((cat.planned / maxAmount) * 1000) / 10;
       const actualWidth = Math.round((cat.actual / maxAmount) * 1000) / 10;
@@ -833,7 +977,7 @@ function renderCharts() {
   }
 
   // 2. Actual Spending by Approval Status stacked bar
-  const breakdown = calculateApprovalBreakdown(appState.categories);
+  const breakdown = calculateApprovalBreakdown(activeEvent.categories);
   approvalChartTotalEl.textContent = `${formatMoney(breakdown.total)} total`;
   approvalStackedBarEl.innerHTML = "";
   approvalLegendEl.innerHTML = "";
@@ -868,7 +1012,8 @@ function renderCharts() {
 }
 
 function renderForecast() {
-  const totals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
+  const activeEvent = getActiveEvent();
+  const totals = calculateEventTotals(activeEvent.categories, activeEvent.totalPlannedBudget);
   const result = calculateYearEndForecast(
     appState.yearForecast,
     totals.totalActual,
@@ -925,8 +1070,10 @@ function renderForecast() {
 }
 
 function renderSummary() {
-  // Overall event cards always calculate across ALL categories in the event
-  const allTotals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
+  const activeEvent = getActiveEvent();
+
+  // Overall event cards always calculate across ALL categories in the active event
+  const allTotals = calculateEventTotals(activeEvent.categories, activeEvent.totalPlannedBudget);
 
   totalActualEl.textContent = formatMoney(allTotals.totalActual);
   totalRemainingEl.textContent = formatMoney(allTotals.overallRemaining);
@@ -964,8 +1111,8 @@ function renderSummary() {
 
   // Table footer sums the currently visible (filtered) rows so the column math always matches
   const isFiltered = hasActiveFilters(filterState);
-  const visibleCategories = getFilteredCategories(appState.categories, filterState);
-  const tableTotals = calculateEventTotals(visibleCategories, appState.totalPlannedBudget);
+  const visibleCategories = getFilteredCategories(activeEvent.categories, filterState);
+  const tableTotals = calculateEventTotals(visibleCategories, activeEvent.totalPlannedBudget);
 
   tableTotalLabelEl.textContent = isFiltered ? "Filtered Total" : "Total";
   tableTotalPlannedEl.textContent = formatMoney(tableTotals.categoriesPlanned);
@@ -989,9 +1136,10 @@ function renderSummary() {
 }
 
 function renderCategories() {
-  const totalCount = appState.categories.length;
+  const activeEvent = getActiveEvent();
+  const totalCount = activeEvent.categories.length;
   const isFiltered = hasActiveFilters(filterState);
-  const visibleCategories = getFilteredCategories(appState.categories, filterState);
+  const visibleCategories = getFilteredCategories(activeEvent.categories, filterState);
 
   clearFiltersBtn.classList.toggle("hidden", !isFiltered);
 
@@ -1192,7 +1340,8 @@ function handleCategoryNameChange(categoryId, inputEl, rowEl) {
   inputEl.classList.remove("input-invalid");
   clearError(tableErrorMsg);
 
-  const category = appState.categories.find((item) => item.id === categoryId);
+  const activeEvent = getActiveEvent();
+  const category = activeEvent.categories.find((item) => item.id === categoryId);
   if (!category) return;
 
   category.name = trimmed;
@@ -1208,7 +1357,8 @@ function handleCategoryNameChange(categoryId, inputEl, rowEl) {
 }
 
 function handleCategoryDetailChange(categoryId, field, value) {
-  const category = appState.categories.find((item) => item.id === categoryId);
+  const activeEvent = getActiveEvent();
+  const category = activeEvent.categories.find((item) => item.id === categoryId);
   if (!category) return;
 
   category[field] = value;
@@ -1228,7 +1378,8 @@ function handleCategoryAmountChange(categoryId, field, inputEl) {
   inputEl.classList.remove("input-invalid");
   clearError(tableErrorMsg);
 
-  const category = appState.categories.find((item) => item.id === categoryId);
+  const activeEvent = getActiveEvent();
+  const category = activeEvent.categories.find((item) => item.id === categoryId);
   if (!category) return;
 
   category[field] = result.value;
@@ -1256,7 +1407,8 @@ function handleCategoryAmountChange(categoryId, field, inputEl) {
 }
 
 function removeCategory(categoryId) {
-  appState.categories = appState.categories.filter((item) => item.id !== categoryId);
+  const activeEvent = getActiveEvent();
+  activeEvent.categories = activeEvent.categories.filter((item) => item.id !== categoryId);
   clearError(tableErrorMsg);
   saveState();
   renderCategories();
@@ -1319,10 +1471,15 @@ function handleForecastInputChange() {
 }
 
 function renderAll() {
-  eventNameInput.value = appState.eventName;
-  totalPlannedInput.value = appState.totalPlannedBudget;
+  const activeEvent = getActiveEvent();
+  renderEventSwitcher();
+  hideDeleteConfirm();
+  eventNameInput.value = activeEvent.eventName;
+  totalPlannedInput.value = activeEvent.totalPlannedBudget;
   totalPlannedInput.classList.remove("input-invalid");
   clearError(budgetErrorMsg);
+  clearError(formErrorMsg);
+  clearError(tableErrorMsg);
   syncForecastInputs();
   renderCategories();
   renderSummary();
@@ -1333,9 +1490,64 @@ function renderAll() {
    4. INITIALIZATION & EVENT LISTENERS
    ========================================================================== */
 
-eventNameInput.addEventListener("input", () => {
-  appState.eventName = eventNameInput.value;
+eventSelect.addEventListener("change", () => {
+  appState.activeEventId = eventSelect.value;
+  resetFilters();
   saveState();
+  renderAll();
+});
+
+newEventBtn.addEventListener("click", () => {
+  const newEvent = {
+    id: createEventId(),
+    eventName: `New Club Event ${appState.events.length + 1}`,
+    totalPlannedBudget: 0,
+    categories: []
+  };
+  appState.events.push(newEvent);
+  appState.activeEventId = newEvent.id;
+  resetFilters();
+  saveState();
+  renderAll();
+  eventNameInput.focus();
+  eventNameInput.select();
+});
+
+deleteEventBtn.addEventListener("click", () => {
+  if (appState.events.length <= 1) return;
+  const activeEvent = getActiveEvent();
+  const displayName = activeEvent.eventName.trim() || "Untitled Event";
+  deleteConfirmText.textContent = `Delete "${displayName}"? This cannot be undone.`;
+  deleteConfirmBar.classList.remove("hidden");
+});
+
+confirmDeleteBtn.addEventListener("click", () => {
+  if (appState.events.length <= 1) {
+    hideDeleteConfirm();
+    return;
+  }
+  const activeId = appState.activeEventId;
+  appState.events = appState.events.filter((evt) => evt.id !== activeId);
+  appState.activeEventId = appState.events[0].id;
+  resetFilters();
+  saveState();
+  renderAll();
+});
+
+cancelDeleteBtn.addEventListener("click", () => {
+  hideDeleteConfirm();
+});
+
+eventNameInput.addEventListener("input", () => {
+  const activeEvent = getActiveEvent();
+  activeEvent.eventName = eventNameInput.value;
+  saveState();
+
+  // Keep the Saved Events dropdown label live-synced with the Event Name input
+  const activeOption = eventSelect.querySelector(`option[value="${activeEvent.id}"]`);
+  if (activeOption) {
+    activeOption.textContent = activeEvent.eventName.trim() || "Untitled Event";
+  }
 });
 
 totalPlannedInput.addEventListener("input", () => {
@@ -1349,14 +1561,16 @@ totalPlannedInput.addEventListener("input", () => {
 
   totalPlannedInput.classList.remove("input-invalid");
   clearError(budgetErrorMsg);
-  appState.totalPlannedBudget = result.value;
+  const activeEvent = getActiveEvent();
+  activeEvent.totalPlannedBudget = result.value;
   saveState();
   renderSummary();
 });
 
 syncBudgetBtn.addEventListener("click", () => {
-  const totals = calculateEventTotals(appState.categories, appState.totalPlannedBudget);
-  appState.totalPlannedBudget = totals.categoriesPlanned;
+  const activeEvent = getActiveEvent();
+  const totals = calculateEventTotals(activeEvent.categories, activeEvent.totalPlannedBudget);
+  activeEvent.totalPlannedBudget = totals.categoriesPlanned;
   totalPlannedInput.value = totals.categoriesPlanned;
   totalPlannedInput.classList.remove("input-invalid");
   clearError(budgetErrorMsg);
@@ -1418,12 +1632,13 @@ addCategoryForm.addEventListener("submit", (event) => {
     return;
   }
 
+  const activeEvent = getActiveEvent();
   const nextId =
-    appState.categories.length > 0
-      ? Math.max(...appState.categories.map((c) => c.id)) + 1
+    activeEvent.categories.length > 0
+      ? Math.max(...activeEvent.categories.map((c) => c.id)) + 1
       : 1;
 
-  appState.categories.push({
+  activeEvent.categories.push({
     id: nextId,
     name,
     date: newExpenseDateInput.value,
@@ -1445,15 +1660,13 @@ resetDemoBtn.addEventListener("click", () => {
   appState = cloneDefaultState();
   resetFilters();
   saveState();
-  clearError(budgetErrorMsg);
-  clearError(formErrorMsg);
-  clearError(tableErrorMsg);
   renderAll();
 });
 
 exportCsvBtn.addEventListener("click", () => {
-  const filename = makeSafeFilename(appState.eventName);
-  const csvText = buildCsvContent(appState);
+  const activeEvent = getActiveEvent();
+  const filename = makeSafeFilename(activeEvent.eventName);
+  const csvText = buildCsvContent(activeEvent);
   const downloaded = downloadCsvFile(filename, csvText);
 
   if (downloaded) {
@@ -1464,7 +1677,8 @@ exportCsvBtn.addEventListener("click", () => {
 });
 
 copyExcelBtn.addEventListener("click", async () => {
-  const tsvText = buildTsvContent(appState);
+  const activeEvent = getActiveEvent();
+  const tsvText = buildTsvContent(activeEvent);
   const copied = await copyTextToClipboard(tsvText);
 
   if (copied) {
@@ -1475,7 +1689,8 @@ copyExcelBtn.addEventListener("click", async () => {
 });
 
 copySummaryBtn.addEventListener("click", async () => {
-  const summaryText = buildTextSummary(appState);
+  const activeEvent = getActiveEvent();
+  const summaryText = buildTextSummary(activeEvent);
   const copied = await copyTextToClipboard(summaryText);
 
   if (copied) {

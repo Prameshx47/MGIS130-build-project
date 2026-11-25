@@ -17,8 +17,42 @@
   </header>
 
   <main class="container">
-    <!-- Event Name & Demo Reset -->
+    <!-- Saved Events Switcher, Event Name & Demo Reset -->
     <section class="card event-card" aria-labelledby="event-heading">
+      <div class="event-switcher-row">
+        <div class="field-group event-select-group">
+          <label for="event-select">Saved Events</label>
+          <select id="event-select" aria-label="Choose a saved club event">
+            <!-- Saved event options are rendered here by script.js -->
+          </select>
+        </div>
+
+        <div class="event-switcher-actions">
+          <button type="button" id="new-event-btn" class="btn btn-primary btn-compact">
+            + New Event
+          </button>
+          <button type="button" id="delete-event-btn" class="btn btn-danger-outline btn-compact">
+            Delete Event
+          </button>
+          <button type="button" id="reset-demo-btn" class="btn btn-secondary btn-compact">
+            Reset Demo Data
+          </button>
+        </div>
+      </div>
+
+      <!-- Inline Delete Confirmation Bar (no browser popups) -->
+      <div id="delete-confirm-bar" class="delete-confirm-bar hidden" role="alert">
+        <span id="delete-confirm-text">Delete this event? This cannot be undone.</span>
+        <div class="delete-confirm-actions">
+          <button type="button" id="confirm-delete-btn" class="btn btn-danger-solid btn-compact">
+            Confirm Delete
+          </button>
+          <button type="button" id="cancel-delete-btn" class="btn btn-secondary btn-compact">
+            Cancel
+          </button>
+        </div>
+      </div>
+
       <div class="event-header-row">
         <div class="field-group">
           <label id="event-heading" for="event-name-input">Event Name</label>
@@ -29,10 +63,8 @@
             autocomplete="off"
           />
         </div>
-        <button type="button" id="reset-demo-btn" class="btn btn-secondary">
-          Reset Demo Data
-        </button>
       </div>
+
       <p class="storage-note">
         Changes save automatically in this browser on this device.
       </p>

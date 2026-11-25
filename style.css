@@ -33,6 +33,7 @@
   --danger-bg: #fce4e4;
   --danger-border: #f1a7a7;
   --danger-text: #b91c1c;
+  --danger-hover: #991b1b;
 
   /* Approval Pill Colors */
   --approval-planned-bg: #f1f3f4;
@@ -119,7 +120,49 @@ body {
   color: var(--text-main);
 }
 
-/* Event Name & Reset Row */
+/* Multiple Events Switcher & Event Name Row */
+.event-switcher-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.event-select-group {
+  min-width: 0;
+}
+
+.event-switcher-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.delete-confirm-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  margin-bottom: 12px;
+  background-color: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  border-left: 4px solid var(--danger-text);
+  border-radius: var(--radius);
+  color: var(--danger-text);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .event-header-row {
   display: flex;
   flex-direction: column;
@@ -191,7 +234,12 @@ input.input-invalid {
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.12s ease, border-color 0.12s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-compact {
@@ -206,7 +254,7 @@ input.input-invalid {
   border-color: var(--primary);
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background-color: var(--primary-hover);
   border-color: var(--primary-hover);
 }
@@ -217,7 +265,7 @@ input.input-invalid {
   border-color: var(--secondary-border);
 }
 
-.btn-secondary:hover {
+.btn-secondary:hover:not(:disabled) {
   background-color: var(--secondary-hover);
 }
 
@@ -230,8 +278,29 @@ input.input-invalid {
   font-size: 0.78rem;
 }
 
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
   background-color: var(--danger-bg);
+}
+
+.btn-danger-outline {
+  background-color: #ffffff;
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+}
+
+.btn-danger-outline:hover:not(:disabled) {
+  background-color: var(--danger-bg);
+}
+
+.btn-danger-solid {
+  background-color: var(--danger-text);
+  color: #ffffff;
+  border-color: var(--danger-text);
+}
+
+.btn-danger-solid:hover:not(:disabled) {
+  background-color: var(--danger-hover);
+  border-color: var(--danger-hover);
 }
 
 /* Summary Cards & Alert Banner */
@@ -1140,6 +1209,16 @@ input.input-invalid {
 }
 
 @media (min-width: 720px) {
+  .event-switcher-row {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .event-select-group {
+    max-width: 420px;
+  }
+
   .event-header-row {
     flex-direction: row;
     align-items: flex-end;
